@@ -45,7 +45,7 @@ graph TD
 ## Repository Structure
 
 ```text
-MedicalChartAgent/
+AI-PhysicianSupport/
 ├── README.md
 ├── requirements.txt
 ├── run_demo.py                                   # CLI runner (live ADK + --offline deterministic trace)
@@ -80,8 +80,8 @@ MedicalChartAgent/
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Sivaram0606/MedicalChartAgent.git
-cd MedicalChartAgent
+git clone https://github.com/Sivaram0606/AI-PhysicianSupport.git
+cd AI-PhysicianSupport
 
 # 2. Create and activate a virtual environment
 python3 -m venv .venv
@@ -168,7 +168,7 @@ curl -s -H "Authorization: Bearer $(gcloud auth application-default print-access
 
 ## 4. Commands to Start & Run the ADK App
 
-Run all commands below from the **repository root (`MedicalChartAgent/`)** with your virtual environment activated (`source .venv/bin/activate`):
+Run all commands below from the **repository root (`AI-PhysicianSupport/`)** with your virtual environment activated (`source .venv/bin/activate`):
 
 ### Option A — Launch the Interactive ADK Web UI (Recommended)
 
