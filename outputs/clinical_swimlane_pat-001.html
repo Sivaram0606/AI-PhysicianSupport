@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>FHIR Multi-Track Clinical Swimlane Graph — pat-001</title>
   <style>
     :root {
@@ -1434,7 +1435,14 @@
         row.appendChild(labelCell);
 
         tps.forEach(tp => {
-          const node = tp.tracks[track.track_id];
+          const node = (tp.tracks && tp.tracks[track.track_id]) || {
+            node_id: "na",
+            badge: "N/A",
+            title: "No Event Recorded",
+            summary: "",
+            details: "",
+            severity: "info"
+          };
           const cell = document.createElement("div");
           cell.className = "node-cell";
 

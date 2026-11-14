@@ -59,30 +59,57 @@ def resolve_canonical_patient_id(patient_identifier: str) -> str:
     return raw
 
 
+import threading
+import time
+
+_FHIR_BUNDLE_CACHE: dict[str, tuple[float, dict[str, Any] | None, str]] = {}
+_FHIR_BUNDLE_LOCK = threading.Lock()
+_FHIR_INFLIGHT_LOCKS: dict[str, threading.Lock] = {}
+_FHIR_CACHE_TTL_SEC = 90.0
+_STRICT_FHIR_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
+
+
 def _fetch_fhir_everything_bundle(patient_identifier: str) -> tuple[str, dict[str, Any] | None, str]:
-    """Fetches `Patient/<id>/$everything` from GCP FHIR Store with fallback to local FHIR R4 bundle."""
+    """Fetches `Patient/<id>/$everything` from GCP FHIR Store with single-flight deduplication and fallback."""
     pid = resolve_canonical_patient_id(patient_identifier)
-    if not pid:
+    if not pid or not _STRICT_FHIR_ID_RE.fullmatch(pid) or ".." in pid:
         return "", None, ""
 
-    bundle: dict[str, Any] | None = None
-    data_source = "GCP Cloud Healthcare FHIR Store (synthe_data)"
-    try:
+    now = time.monotonic()
+    with _FHIR_BUNDLE_LOCK:
+        cached = _FHIR_BUNDLE_CACHE.get(pid)
+        if cached and (now - cached[0]) < _FHIR_CACHE_TTL_SEC:
+            return pid, cached[1], cached[2]
+        pid_lock = _FHIR_INFLIGHT_LOCKS.setdefault(pid, threading.Lock())
+
+    with pid_lock:
+        now = time.monotonic()
+        with _FHIR_BUNDLE_LOCK:
+            cached = _FHIR_BUNDLE_CACHE.get(pid)
+            if cached and (now - cached[0]) < _FHIR_CACHE_TTL_SEC:
+                return pid, cached[1], cached[2]
+
+        bundle: dict[str, Any] | None = None
+        data_source = "GCP Cloud Healthcare FHIR Store (synthe_data)"
         try:
-            from .server import get_patient_everything
-        except ImportError:
-            from server import get_patient_everything  # type: ignore
+            try:
+                from .server import get_patient_everything
+            except ImportError:
+                from server import get_patient_everything  # type: ignore
 
-        bundle = get_patient_everything(pid)
-    except Exception as exc:
-        logger.warning("GCP FHIR $everything lookup failed for %s: %s", pid, type(exc).__name__)
+            bundle = get_patient_everything(pid)
+        except Exception as exc:
+            logger.warning("GCP FHIR $everything lookup failed (%s).", type(exc).__name__)
 
-    if not bundle or "entry" not in bundle:
-        if pid in FALLBACK_BUNDLES:
-            bundle = FALLBACK_BUNDLES[pid]
-            data_source = "Synthea FHIR R4 Emergency Ward Clinical Store (synthe_data fallback)"
+        if not bundle or "entry" not in bundle:
+            if pid in FALLBACK_BUNDLES:
+                bundle = FALLBACK_BUNDLES[pid]
+                data_source = "Synthea FHIR R4 Emergency Ward Clinical Store (synthe_data fallback)"
 
-    return pid, bundle, data_source
+        with _FHIR_BUNDLE_LOCK:
+            _FHIR_BUNDLE_CACHE[pid] = (time.monotonic(), bundle, data_source)
+
+        return pid, bundle, data_source
 
 
 def _compute_age(birth_date: str) -> int | None:

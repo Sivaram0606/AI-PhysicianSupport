@@ -1,9 +1,19 @@
 import os
+import ssl
+from pathlib import Path
+
+import certifi
 from dotenv import load_dotenv
+
+if not os.environ.get("SSL_CERT_FILE") and ssl.get_default_verify_paths().cafile is None:
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
+
 from google.adk.agents import LlmAgent
+
 from ...clinical_tools import get_location_outbreak_and_disease_data
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
 
 outbreak_surveillance_agent = LlmAgent(
     name="outbreak_surveillance_agent",

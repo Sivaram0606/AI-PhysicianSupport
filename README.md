@@ -8,11 +8,20 @@ Designed for attending Emergency Department (ED) and clinic physicians, **`ehr_c
 
 ## Key Capabilities
 
-1. **Progressive Stage-by-Stage Clinical Workflow**:
+1. **Emergency Physician Assist Interactive UI (`physician_assist_app.py`)**:
+   - **Emergency Ward Roster & Quick Patient Selection**: Filterable roster of `pat-001` – `pat-007` with live FHIR chief complaints, vitals, allergies, and 5-digit ZIP codes.
+   - **Guided 4-Step Progressive Clinical Investigation with Physician Validation Gate**:
+     - **Step 1 — Longitudinal Medical Charts**: Triage vitals, interactive Plotly multi-date lab trend curves (`Baseline -> Peak -> Latest`), diagnostic imaging, hospitalization/consult notes, and open clinical loops (loaded concurrently via single-flight FHIR `$everything` deduplication).
+     - **Step 2 — Interactive 4-Track Clinical Swimlane Chart**: Offline CSP-sandboxed HTML/SVG 4-track temporal timeline + synchronized cross-track causal matrix.
+     - **Step 3 — Drugs Used & Adverse Effects + Duplicate Ingredient Alert + Physician Validation Gate**: Single-call parallel NIH RxNorm Generic vs. Brand + OpenFDA SPL/FAERS regimen audit (`audit_patient_medications_rxnorm_openfda`), deterministic **Duplicate Active Ingredient Safety Hazard** detection across active and leftover stopped/held prescriptions, and an explicit **Physician Validation Gate** before unlocking Step 4.
+     - **Step 4 — 5-Digit ZIP-Code Outbreak & Infection Surveillance**: Unlocked after Step 3 physician validation; queries CDC NSSP Local ED trajectories, CDC NWSS Sewershed Wastewater PCR pathogens, CDC PLACES ZCTA5 prevalence, and Open-Meteo hyperlocal air quality in parallel.
+   - **Separate Symptom Mapping UI + Google ADK Symptom Agents**: Displays progressive symptom-to-etiology mapping **separately in the UI** — both in a dedicated side-by-side right panel during Steps 1–4 and in a dedicated full-screen **Symptom Mapping Matrix** tab, powered by `symptom_mapping_pipeline` (`ParallelAgent` intake $\rightarrow$ `clinical_symptom_mapper_agent`) with bedside physician Confirm/Rule-Out overrides.
+2. **Conversational Multi-Agent ADK Workflow (`adk web` / `adk run`)**:
    - **Stage 1 (Greeting & Ward Roster)**: Introduces agent capabilities and pulls the live Emergency Ward patient roster (`pat-001` – `pat-007`) from FHIR with chief complaints and residential ZIP codes.
-   - **Stage 2 (Patient & Medication Audit — 1st Go)**: Retrieves the patient's FHIR triage vitals, intake note, active/past conditions, and allergies, alongside longitudinal **Medication Reconciliation** (dose changes, held medications with restart thresholds, real-world adherence barriers), **Original Drug Name (Generic) vs. Brand Name** classification (**NIH NLM RxNorm API**), and **Clinical Uses, Boxed Warnings & Known Adverse Effects** (**OpenFDA Drug Label & FAERS APIs**).
-   - **Stage 3A (Longitudinal Chart Compartments, 4-Track Swimlane & 1-Page Brief)**: On request, retrieves multi-date lab trajectories (`Baseline -> Peak -> Latest`), diagnostic imaging (`CT`, `TTE Echo`, `CXR`), hospitalization/consult notes, unresolved open clinical loops (`Flag`), or delegates to `chart_review_pipeline` (`SequentialAgent` + `ParallelAgent`) to synthesize a full **1-Page Physician Chart Brief + Interactive 4-Track Clinical Swimlane Graph**.
-   - **Stage 3B (Hyperlocal Patient 5-Digit ZIP-Code Outbreak Surveillance)**: Queries **strictly the patient's 5-digit ZIP code (`postal_code`)** — never high-level statewide or national summaries — combining **CDC PLACES ZCTA5 (`qnzd-25i4`)**, **CDC NSSP Local Hospital ED Trajectories (`rdmq-nq56`)**, **CDC NWSS Local Sewershed Wastewater Pathogens**, and **Open-Meteo Hyperlocal Air Quality**.
+   - **Stage 2 (Select Patient — 1st Go: Triage + Longitudinal Labs, Imaging, Hospitalization Notes & Open Loops)**: Retrieves the patient's FHIR triage vitals, intake note, allergies, active problem list, multi-date lab trajectories (`Baseline -> Peak -> Latest`), diagnostic imaging (`CT`, `TTE Echo`, `CXR`), hospitalization/consult notes, and unresolved open clinical loops (`Flag`).
+   - **Stage 3 (Swimlane Charts — 2nd Go)**: Generates the **Interactive 4-Track Clinical Swimlane Chart** (Mermaid + Markdown temporal matrix + HTML/SVG viewer + cross-track causal links).
+   - **Stage 4 (Check Drugs & Adverse Effects — Initiated Only After Swimlane Charts)**: Executes a parallel full-regimen reconciliation and RxNorm/OpenFDA audit (`audit_patient_medications_rxnorm_openfda`), flags brand-vs-generic duplicate active ingredients, and details boxed warnings, adherence barriers, and known adverse effects.
+   - **Stage 5 (Hyperlocal Patient 5-Digit ZIP-Code Outbreak Surveillance & 1-Page Brief)**: Queries **strictly the patient's 5-digit ZIP code (`postal_code`)** — combining **CDC PLACES ZCTA5 (`qnzd-25i4`)**, **CDC NSSP Local Hospital ED Trajectories (`rdmq-nq56`)**, **CDC NWSS Local Sewershed Wastewater Pathogens**, and **Open-Meteo Hyperlocal Air Quality**, or delegates to `chart_review_pipeline` for a full **1-Page Physician Chart Brief**.
    - **Next-Stage Guidance & Verifiable Citations**: Every turn ends with actionable **Suggested Next Steps** and cites exact FHIR resource IDs (no private FHIR links) plus clickable URLs for all external public health and drug APIs.
 
 ---
@@ -21,23 +30,33 @@ Designed for attending Emergency Department (ED) and clinic physicians, **`ehr_c
 
 ```mermaid
 graph TD
-    Physician["Attending ED / Clinic Physician"] --> Root["ehr_chart_summary_agent (Root LlmAgent)"]
+    Physician["Attending ED / Clinic Physician"] --> UI["physician_assist_app.py\n(Emergency Physician Assist UI)"]
+    Physician --> Root["ehr_chart_summary_agent (Root LlmAgent)"]
 
-    Root -->|"Stage 1: Greeting / Roster"| WardList["list_emergency_ward_patients()\n(FHIR Patient + Triage Encounter)"]
-    Root -->|"Stage 2: Select Patient (1st Go)"| MedAudit["get_patient_clinical_profile() +\ncheck_drug_brand_or_generic() (RxNorm + OpenFDA)"]
-    Root -->|"Stage 3A: Targeted Compartments / Swimlane"| Compartments["FHIR Labs / Notes / Open Loops /\ngenerate_clinical_swimlane_graph()"]
-    Root -->|"Stage 3A: Full 1-Page Chart Brief"| Pipeline["chart_review_pipeline (SequentialAgent)"]
-    Root -->|"Stage 3B: ZIP-Code Outbreaks"| ZipSurv["get_location_outbreak_and_disease_data(postal_code)\n(CDC ZCTA5 + Local ED + Sewershed + AQI)"]
+    UI -->|"Dedicated Separate Symptom UI"| SymPipe["symptom_mapping_pipeline (SequentialAgent)"]
+    Root -->|"Symptom Mapping Delegation"| SymPipe
+    SymPipe --> SymPar["1. parallel_symptom_intake (ParallelAgent)"]
+    SymPar --> SymExt["symptom_extractor_agent\n(FHIR Triage + Vital + Acute Lab Signs)"]
+    SymPar --> SymCtx["symptom_context_harvester_agent\n(Concurrent EHR / Drug / ZIP Context)"]
+    SymExt & SymCtx --> SymMap["2. clinical_symptom_mapper_agent (LlmAgent)\n(Progressive EHR -> Drug AE -> ZIP Outbreak Mapping)"]
 
-    Pipeline --> S1["intake_and_triage_agent (LlmAgent)"]
-    S1 -->|"State: patient_intake_context"| S2["parallel_ehr_domain_agents (ParallelAgent)"]
+    Root -->|"Stage 1: Greeting / Roster"| WardList["list_emergency_ward_patients()\n(Concurrent FHIR Patient + Triage Encounter)"]
+    Root -->|"Stage 2: Select Patient (1st Go)"| Compartments["Triage + Longitudinal Labs & Imaging +\nHospitalization Notes + Open Loops\n(Single-Flight FHIR $everything Lock)"]
+    Root -->|"Stage 3: 2nd Go"| Swimlane["generate_clinical_swimlane_graph()\n(CSP-Sandboxed 4-Track Swimlane Chart)"]
+    Root -->|"Stage 4: After Swimlane"| MedAudit["get_medication_reconciliation_history() +\naudit_patient_medications_rxnorm_openfda()\n(Parallel RxNorm + OpenFDA + Duplicate Ingredient Alert)"]
+    Root -->|"Stage 5: ZIP-Code Outbreaks"| ZipSurv["get_location_outbreak_and_disease_data(postal_code)\n(Parallel CDC ZCTA5 + Local ED + Sewershed + AQI)"]
+    Root -->|"Full 1-Page Chart Brief"| Pipeline["chart_review_pipeline (SequentialAgent)"]
 
-    S2 --> D1["hospitalization_notes_agent\n(FHIR Encounter + DocumentReference)"]
-    S2 --> D2["medication_reconciliation_agent\n(FHIR MedicationRequest + RxNorm/OpenFDA)"]
-    S2 --> D3["labs_imaging_trend_agent\n(FHIR Observation + DiagnosticReport)"]
-    S2 --> D4["open_loops_care_gaps_agent\n(FHIR Flag)"]
+    Pipeline --> S1["1. intake_and_triage_agent (LlmAgent)"]
+    S1 --> S2["2. parallel_ehr_domain_agents (ParallelAgent)"]
 
-    D1 & D2 & D3 & D4 --> S3["pre_chart_brief_synthesizer (LlmAgent)\n1-Page Brief + 4-Track HTML/SVG Swimlane"]
+    S2 --> D1["labs_imaging_trend_agent\n(FHIR Observation + DiagnosticReport)"]
+    S2 --> D2["hospitalization_notes_agent\n(FHIR Encounter + DocumentReference)"]
+    S2 --> D3["open_loops_care_gaps_agent\n(FHIR Flag)"]
+
+    D1 & D2 & D3 --> S3["3. clinical_swimlane_agent (LlmAgent)\n(4-Track Clinical Swimlane Chart)"]
+    S3 --> S4["4. medication_reconciliation_agent (LlmAgent)\n(Parallel RxNorm + OpenFDA Regimen Audit)"]
+    S4 --> S5["5. pre_chart_brief_synthesizer (LlmAgent)\n(1-Page Physician Chart Brief)"]
 ```
 
 ---
@@ -48,6 +67,7 @@ graph TD
 AI-PhysicianSupport/
 ├── README.md
 ├── requirements.txt
+├── physician_assist_app.py                       # Emergency Physician Assist Web UI (Roster + 4-Step Gate + Separate Symptom Mapper UI)
 ├── run_demo.py                                   # CLI runner (live ADK + --offline deterministic trace)
 ├── outputs/                                      # Generated Interactive 4-Track HTML/SVG Swimlane Viewers
 │   └── clinical_swimlane_pat-005.html
@@ -57,6 +77,7 @@ AI-PhysicianSupport/
     ├── agent.py                                  # Root agent (`ehr_chart_summary_agent`)
     ├── clinical_tools.py                         # FHIR profile, RxNorm/OpenFDA & ZIP-code outbreak tools
     ├── ehr_chart_tools.py                        # FHIR longitudinal EHR compartment & swimlane tools
+    ├── symptom_mapping_tools.py                  # Progressive FHIR symptom extraction & multi-stage etiology mapper
     ├── fhir_cohort_data.py                       # Canonical HL7 FHIR R4 builder for `pat-001`..`pat-007`
     ├── seed_fhir_store.py                        # Creates & populates GCP Cloud Healthcare FHIR R4 store
     ├── server.py                                 # GCP FHIR HTTP helpers & FastMCP tool server
@@ -64,6 +85,7 @@ AI-PhysicianSupport/
     ├── workflow.py                               # ADK Graph Workflow definition
     └── sub_agents/
         ├── chart_summarizer_pipeline/            # Sequential + Parallel 1-Page Chart Brief pipeline
+        ├── symptom_mapper/                       # Google ADK Symptom Extractor + Progressive Etiology Mapper pipeline
         ├── drug_brand_checker/                   # NIH RxNorm + OpenFDA specialist sub-agent
         ├── get_adverse_effects/                  # FAERS adverse event sub-agent
         ├── get_medication_details/               # FHIR medication lookup sub-agent
@@ -95,7 +117,7 @@ pip install -r requirements.txt
 
 ## 2. Environment Configuration (`.env`)
 
-Copy `.env.example` to `ehr_chart_summary_agent/.env` and set your GCP Project ID:
+Copy `.env.example` to `ehr_chart_summary_agent/.env` and set your GCP Project ID and FHIR dataset location:
 
 ```bash
 cp ehr_chart_summary_agent/.env.example ehr_chart_summary_agent/.env
@@ -109,9 +131,15 @@ GOOGLE_CLOUD_PROJECT=your-gcp-project-id
 GOOGLE_CLOUD_LOCATION=global
 MODEL_NAME=gemini-3.8-flash
 
-FHIR_DATASET_LOCATION=asia-east1
+# Google Cloud Healthcare API (FHIR R4 Store) Configuration
+FHIR_DATASET_LOCATION=us-central1   # or asia-east1 depending on your dataset region
 FHIR_DATASET_ID=test
 FHIR_STORE_ID=synthe_data
+
+# Security & MCP Transport Controls (Optional — secure defaults shown)
+ALLOW_PUBLIC_HAPI_FALLBACK=false
+USE_EXTERNAL_MCP_SERVER=false
+MCP_SERVER_URL=http://127.0.0.1:8080/mcp
 ```
 
 > **Note on `GOOGLE_CLOUD_LOCATION=global`**: `gemini-3.8-flash` on Vertex AI uses the `global` endpoint (`locations/global/publishers/google/models/gemini-3.8-flash`).
@@ -148,7 +176,7 @@ Your authenticated principal needs:
 ```bash
 python -m ehr_chart_summary_agent.seed_fhir_store \
   --project "$PROJECT_ID" \
-  --location asia-east1 \
+  --location us-central1 \
   --dataset test \
   --fhir-store synthe_data
 ```
@@ -159,59 +187,71 @@ python -m ehr_chart_summary_agent.seed_fhir_store \
 
 ```bash
 curl -s -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-  "https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/asia-east1/datasets/test/fhirStores/synthe_data/fhir/Patient" | head -n 40
+  "https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/us-central1/datasets/test/fhirStores/synthe_data/fhir/Patient" | head -n 40
 ```
 
 > **Automatic Local FHIR R4 Fallback**: If GCP credentials are not configured or offline, all tools automatically fall back to identical in-memory HL7 FHIR R4 `Patient/$everything` bundles built by [`fhir_cohort_data.py`](ehr_chart_summary_agent/fhir_cohort_data.py) so local testing and demos always work out of the box.
 
 ---
 
-## 4. Commands to Start & Run the ADK App
+## 4. Commands to Start & Run the App
 
-Run all commands below from the **repository root (`AI-PhysicianSupport/`)** with your virtual environment activated (`source .venv/bin/activate`):
+Run all commands below from the **repository root (`AI-PhysicianSupport/`)** with your virtual environment activated (`source .venv/bin/activate`, or prefix commands with `.venv/bin/`):
 
-### Option A — Launch the Interactive ADK Web UI (Recommended)
+### Option A — Launch the Emergency Physician Assist Web UI (Recommended Clinical Workspace)
 
 ```bash
-adk web
+.venv/bin/streamlit run physician_assist_app.py
+```
+
+1. Open **`http://localhost:8501`** in your browser.
+2. Select a patient from the **Emergency Ward Roster** (`pat-001` – `pat-007`) or header dropdown.
+3. Step progressively through **Step 1 (Longitudinal Medical Charts)** $\rightarrow$ **Step 2 (4-Track Clinical Swimlane)** $\rightarrow$ **Step 3 (Drugs & Adverse Effects + Duplicate Active-Ingredient Alert + Physician Validation Gate)** $\rightarrow$ **Step 4 (5-Digit ZIP-Code Outbreak Surveillance)** while reviewing the **Separate Symptom Mapping Agent UI** in the side panel or dedicated **Symptom Mapping Matrix** tab.
+
+### Option B — Launch the Interactive ADK Conversational Web UI (`adk web`)
+
+```bash
+.venv/bin/adk web
 ```
 
 1. Open **`http://127.0.0.1:8000`** in your browser.
 2. In the top-left agent selector dropdown, choose **`ehr_chart_summary_agent`**.
 3. Start chatting with **`Hi`** to view capabilities and the 7-patient Emergency Ward roster!
 
-*(To run on a custom port, e.g., `8085`: `adk web --host 127.0.0.1 --port 8085`)*
+*(To run on a custom port, e.g., `8085`: `.venv/bin/adk web --host 127.0.0.1 --port 8085`)*
 
-### Option B — Launch Interactive Terminal Chat (`adk run`)
-
-```bash
-adk run ehr_chart_summary_agent
-```
-
-### Option C — Launch ADK FastAPI Backend Server (`adk api_server`)
+### Option C — Launch Interactive Terminal Chat (`adk run`)
 
 ```bash
-adk api_server --host 127.0.0.1 --port 8000
+.venv/bin/adk run ehr_chart_summary_agent
 ```
 
-### Option D — Run the CLI Demo Script (`run_demo.py`)
+### Option D — Launch ADK FastAPI Backend Server (`adk api_server`)
+
+```bash
+.venv/bin/adk api_server --host 127.0.0.1 --port 8000
+```
+
+### Option E — Run the CLI Demo Script (`run_demo.py`)
 
 ```bash
 # List all 7 Emergency Ward patients from FHIR
-python run_demo.py --list
+.venv/bin/python run_demo.py --list
 
 # Run live multi-agent 1-Page Chart Brief + 4-Track Swimlane via Vertex AI
-python run_demo.py --patient pat-005
+.venv/bin/python run_demo.py --patient pat-005
 
 # Run deterministic local FHIR + RxNorm/OpenFDA + ZIP-Outbreak trace (no LLM key needed)
-python run_demo.py --patient pat-005 --offline
+.venv/bin/python run_demo.py --patient pat-005 --offline
 ```
 
-### Option E — Run the Standalone MCP Tool Server (Optional)
+### Option F — Run the Headless FastMCP Tool Server (Optional — External MCP Clients Only)
 
 ```bash
-python -m ehr_chart_summary_agent.server
+.venv/bin/python -m ehr_chart_summary_agent.server
 ```
+
+> **Note**: `server.py` is a **headless Model Context Protocol (MCP) backend** listening on `http://127.0.0.1:8080/mcp` for external MCP clients (opening `http://127.0.0.1:8080/` in a browser will return `404 Not Found`). You **do not** need to run `server.py` to use `physician_assist_app.py`, `adk web`, or `run_demo.py` — all ADK agents bind pooled Python tools directly in-process by default unless `USE_EXTERNAL_MCP_SERVER=true` is set.
 
 ---
 
@@ -239,23 +279,29 @@ Hi
 ```
 *(Agent introduces its 5 capabilities, queries FHIR for `pat-001` – `pat-007`, displays the Emergency Ward patient table with Chief Complaints and ZIP codes, and suggests selecting a patient.)*
 
-**Turn 2 — Select a Patient (1st Go: Triage + Medication Brand/Generic, Adherence & Adverse Effects)**
+**Turn 2 — Select a Patient (1st Go: Triage + Longitudinal Lab Trends, Diagnostic Imaging, Hospitalization Notes & Open Clinical Loops)**
 ```text
-Select pat-005 (Arthur Pendelton)
+Select pat-001 (Alex Jordan Conn)
 ```
-*(Agent presents Arthur's triage vitals, active conditions, allergies, active vs. held medications, Prior Auth/self-titration adherence gaps, RxNorm **ORIGINAL DRUG NAME vs. BRAND NAME** verification, and OpenFDA uses/adverse effects — then suggests next stages such as checking Longitudinal Labs/Open Loops, 4-Track Swimlane, or ZIP-Code Outbreaks.)*
+*(Agent presents Alex's triage vitals, allergies, active conditions, multi-date longitudinal lab trends, diagnostic imaging, hospitalization/consult notes, and unresolved open clinical loops — without initiating drug checks yet — and prompts to generate the **4-Track Clinical Swimlane Chart** next.)*
 
-**Turn 3 — Longitudinal Labs, Hospitalizations, Open Loops & 4-Track Swimlane Graph**
+**Turn 3 — Interactive 4-Track Clinical Swimlane Chart (2nd Go)**
 ```text
-Show his longitudinal lab trends, open clinical loops, and generate the 4-track clinical swimlane graph
+Yes, generate the 4-track clinical swimlane chart
 ```
-*(Agent retrieves multi-date `Cr`, `eGFR`, `NT-proBNP`, `K+`, and `HbA1c` trajectories, `CT Chest` / `TTE` findings, open loops `OPEN-101`–`OPEN-104`, and renders the synchronized 4-Track Mermaid + Markdown Swimlane + saves `outputs/clinical_swimlane_pat-005.html`.)*
+*(Agent renders the synchronized 4-Track Mermaid + Markdown Swimlane + saves `outputs/clinical_swimlane_pat-001.html`, then asks to initiate the **Check Drugs, Brand vs. Generic & Adverse Effects** audit next.)*
 
-**Turn 4 — Hyperlocal Patient ZIP-Code Outbreak & Disease Surveillance**
+**Turn 4 — Check Drugs, Brand vs. Generic & Adverse Effects (Initiated After Swimlane Charts)**
+```text
+Yes, check his drugs and their adverse effects
+```
+*(Agent reconciles active, held, and stopped medications, verifies **ORIGINAL DRUG NAME (GENERIC) vs. BRAND NAME** via NIH RxNorm, reports OpenFDA uses/boxed warnings/FAERS adverse effects, and correlates them with his lab trends and swimlane events.)*
+
+**Turn 5 — Hyperlocal Patient ZIP-Code Outbreak & Disease Surveillance**
 ```text
 Check for any active outbreaks and persistent diseases in his zip code
 ```
-*(Agent queries strictly ZIP code `60611` via CDC PLACES ZCTA5, local hospital ED trajectories, local sewershed pathogen detections, and ZIP air quality, correlating respiratory virus trends and air quality with his HFrEF dyspnea.)*
+*(Agent queries strictly ZIP code `02118` via CDC PLACES ZCTA5, local hospital ED trajectories, local sewershed pathogen detections, and ZIP air quality.)*
 
 ---
 
@@ -295,3 +341,20 @@ Check for any active outbreaks and persistent diseases in his zip code
 | **Local ED Outbreaks** | **CDC NSSP Emergency Dept Trajectories** (`data.cdc.gov/resource/rdmq-nq56.json`) | Weekly local hospital ED visit % & trends (`Increasing`/`Decreasing`/`No Change`) for Flu, COVID-19 & RSV serving the ZIP code |
 | **Local Wastewater Pathogens** | **CDC NWSS Wastewater Surveillance** (`ymmh-divb`, `j9g8-acpt`, `45cq-cw4i`, `akvg-8vrb`, `xpxn-rzgz`) | Real-time PCR viral concentrations & surges (Influenza A, SARS-CoV-2, RSV, Measles, Mpox) in the local sewershed serving the ZIP code |
 | **ZIP Air Quality** | **Open-Meteo Air Quality API** (`air-quality-api.open-meteo.com`) | Hyperlocal US AQI, `PM2.5`, `PM10`, `Ozone` & `NO2` at exact ZIP coordinates |
+
+---
+
+## 8. Performance, Efficiency & Security Architecture
+
+### Agent & Data-Layer Efficiency
+- **Single-Flight FHIR `$everything` Deduplication (`6x -> 1x` GCP HTTP Request)**: Per-patient single-flight locks (`_FHIR_INFLIGHT_LOCKS`) and a 90s TTL cache (`_FHIR_BUNDLE_CACHE`) in `ehr_chart_tools.py` collapse concurrent `ParallelAgent` and UI compartment reads into a single GCP Cloud Healthcare `$everything` call (`<0.1 ms` warm).
+- **Thread-Safe OAuth2 & HTTP Connection Pooling**: Singleton GCP `AuthorizedSession` (`HTTPAdapter(pool_connections=12, pool_maxsize=16)`) in `server.py` and shared pooled `_HTTP_SESSION` + TTL caches (`_ROSTER_CACHE`, `_DRUG_CACHE`, `_OUTBREAK_CACHE`) in `clinical_tools.py` eliminate repeated ADC token handshakes and TCP/TLS setup overhead.
+- **Single-Call Parallel Medication Regimen Audit**: `audit_patient_medications_rxnorm_openfda(patient_id)` audits all active and held/stopped medications concurrently across NIH RxNorm (`properties.json` + `related.json`) and OpenFDA (`SPL Label` + `FAERS`) in **1 LLM tool call** while deterministically flagging cross-status brand-vs-generic duplicate active ingredients (e.g., `Tylenol` + leftover `Acetaminophen`).
+- **Concurrent 4-Source ZIP Surveillance & Streamlined ADK Execution**: `get_location_outbreak_and_disease_data` runs `CDC PLACES ZCTA5`, `CDC NSSP ED`, `CDC NWSS Wastewater`, and `Open-Meteo AQI` concurrently; `symptom_mapping_pipeline` reuses a singleton `InMemoryRunner` with a `ParallelAgent` intake stage; and `root_agent` binds direct in-process tools to avoid redundant 1-tool sub-agent handoffs.
+
+### Security Architecture Hardening
+- **GCP Healthcare SSRF & Dot-Segment Path Traversal Prevention (`CWE-22` / `CWE-918`)**: Strict leading-alphanumeric identifier validation (`^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$`), explicit `".."` rejection, and `urllib.parse.quote(..., safe="")` protect all GCP Healthcare URL builders across `server.py`, `ehr_chart_tools.py`, `clinical_tools.py`, and `seed_fhir_store.py`.
+- **PHI-Safe Logging & Public HAPI Exfiltration Lockdown (`CWE-200` / `CWE-532`)**: Raw FHIR HTTP response bodies are stripped from error logs (logging HTTP status codes only), and fallback of internal patient IDs to public `https://hapi.fhir.org` is disabled by default (`ALLOW_PUBLIC_HAPI_FALLBACK=false`).
+- **OpenFDA Lucene & CDC Socrata SoQL Injection Guards**: Drug query terms are sanitized via `_sanitize_lucene_term` with bounded `(4, 10)` socket timeouts, and Socrata `$where` clauses enforce finite WGS84 bounds (`_validate_coords`) and strict 5-digit FIPS validation (`^\d{5}$`).
+- **Offline Swimlane CSP Sandbox & `OWASP LLM01` Prompt Isolation**: Generated clinical swimlane HTML embeds `Content-Security-Policy: default-src 'none'; ... connect-src 'none'` alongside `html.escape()` XSS sanitization; `server.py` binds exclusively to `127.0.0.1`; and ADK agent prompts isolate untrusted EHR/FDA free-text while sanitizing XML tags on `<physician_bedside_note>`.
+

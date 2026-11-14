@@ -320,6 +320,7 @@ def generate_interactive_swimlane_html(
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>FHIR Multi-Track Clinical Swimlane Graph — {safe_title_id}</title>
   <style>
     :root {{
@@ -597,7 +598,14 @@ def generate_interactive_swimlane_html(
         row.appendChild(labelCell);
 
         tps.forEach(tp => {{
-          const node = tp.tracks[track.track_id];
+          const node = (tp.tracks && tp.tracks[track.track_id]) || {{
+            node_id: "na",
+            badge: "N/A",
+            title: "No Event Recorded",
+            summary: "",
+            details: "",
+            severity: "info"
+          }};
           const cell = document.createElement("div");
           cell.className = "node-cell";
 

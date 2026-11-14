@@ -26,7 +26,18 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
+import re
+from urllib.parse import quote
+
 BASE_URL = "https://healthcare.googleapis.com/v1"
+_GCP_IDENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,127}$")
+
+
+def _safe_ident(value: str, label: str) -> str:
+    cleaned = (value or "").strip()
+    if not _GCP_IDENT_RE.fullmatch(cleaned) or ".." in cleaned:
+        raise ValueError(f"Invalid {label} identifier: {value!r}")
+    return quote(cleaned, safe="")
 
 
 def get_authorized_session() -> grequests.AuthorizedSession:
@@ -41,8 +52,13 @@ def ensure_dataset_and_fhir_store(
     dataset_id: str,
     fhir_store_id: str,
 ) -> str:
-    parent = f"{BASE_URL}/projects/{project_id}/locations/{location}"
-    dataset_url = f"{parent}/datasets/{dataset_id}"
+    safe_proj = _safe_ident(project_id, "project_id")
+    safe_loc = _safe_ident(location, "location")
+    safe_ds = _safe_ident(dataset_id, "dataset_id")
+    safe_store = _safe_ident(fhir_store_id, "fhir_store_id")
+
+    parent = f"{BASE_URL}/projects/{safe_proj}/locations/{safe_loc}"
+    dataset_url = f"{parent}/datasets/{safe_ds}"
 
     r_ds = session.get(dataset_url, timeout=15)
     if r_ds.status_code == 404:
@@ -54,16 +70,19 @@ def ensure_dataset_and_fhir_store(
             timeout=15,
         )
         if r_create_ds.status_code not in (200, 201, 409):
+            logging.error("Failed creating dataset (HTTP %d).", r_create_ds.status_code)
             r_create_ds.raise_for_status()
         for _ in range(45):
             if session.get(dataset_url, timeout=10).status_code == 200:
                 break
             time.sleep(4)
     else:
+        if not r_ds.ok:
+            logging.error("Failed checking dataset (HTTP %d).", r_ds.status_code)
         r_ds.raise_for_status()
         logging.info("Healthcare Dataset '%s' verified.", dataset_id)
 
-    fhir_store_url = f"{dataset_url}/fhirStores/{fhir_store_id}"
+    fhir_store_url = f"{dataset_url}/fhirStores/{safe_store}"
     r_fs = session.get(fhir_store_url, timeout=15)
     if r_fs.status_code in (404, 403):
         logging.info("Creating FHIR R4 Store '%s'...", fhir_store_id)
@@ -78,9 +97,12 @@ def ensure_dataset_and_fhir_store(
             timeout=15,
         )
         if r_create_fs.status_code not in (200, 201, 409):
+            logging.error("Failed creating FHIR store (HTTP %d).", r_create_fs.status_code)
             r_create_fs.raise_for_status()
         time.sleep(2)
     else:
+        if not r_fs.ok:
+            logging.error("Failed checking FHIR store (HTTP %d).", r_fs.status_code)
         r_fs.raise_for_status()
         logging.info("FHIR Store '%s' verified.", fhir_store_id)
 
@@ -107,13 +129,15 @@ def seed_all(
     ok_count = 0
     err_count = 0
     for rtype, rid, body in resources:
-        url = f"{fhir_base}/{rtype}/{rid}"
+        safe_rtype = _safe_ident(rtype, "FHIR resourceType")
+        safe_rid = _safe_ident(rid, "FHIR resourceId")
+        url = f"{fhir_base}/{safe_rtype}/{safe_rid}"
         resp = session.put(url, headers=headers, json=body, timeout=15)
         if resp.status_code in (200, 201):
             ok_count += 1
         else:
             err_count += 1
-            logging.error("Failed %s/%s (HTTP %d): %s", rtype, rid, resp.status_code, resp.text)
+            logging.error("Failed %s/%s (HTTP %d).", rtype, rid, resp.status_code)
 
     logging.info(
         "Completed FHIR R4 seeding in projects/%s/locations/%s/datasets/%s/fhirStores/%s: %d succeeded, %d failed.",
@@ -127,18 +151,34 @@ def seed_all(
 
 
 def main() -> None:
+    default_project = os.getenv("GOOGLE_CLOUD_PROJECT", "gsd-argolis-playground").strip()
+    default_location = os.getenv("FHIR_DATASET_LOCATION", "asia-east1").strip()
+    default_dataset = os.getenv("FHIR_DATASET_ID", "test").strip()
+    default_fhir_store = os.getenv("FHIR_STORE_ID", "synthe_data").strip()
+
     parser = argparse.ArgumentParser(description="Seed GCP Cloud Healthcare FHIR R4 Store with pat-001..pat-007")
-    parser.add_argument("--project", default=os.getenv("GOOGLE_CLOUD_PROJECT", "gsd-argolis-playground"))
-    parser.add_argument("--location", default=os.getenv("FHIR_DATASET_LOCATION", "asia-east1"))
-    parser.add_argument("--dataset", default=os.getenv("FHIR_DATASET_ID", "test"))
-    parser.add_argument("--fhir-store", default=os.getenv("FHIR_STORE_ID", "synthe_data"))
+    parser.add_argument("--project", default=default_project)
+    parser.add_argument("--location", default=default_location)
+    parser.add_argument("--dataset", default=default_dataset)
+    parser.add_argument("--fhir-store", default=default_fhir_store)
     args = parser.parse_args()
 
+    project_id = (args.project or "").strip() or default_project
+    location = (args.location or "").strip() or default_location
+    dataset_id = (args.dataset or "").strip() or default_dataset
+    fhir_store_id = (args.fhir_store or "").strip() or default_fhir_store
+
+    if not project_id:
+        parser.error(
+            "GCP project ID is empty. Export PROJECT_ID, pass --project <PROJECT_ID>, "
+            "or set GOOGLE_CLOUD_PROJECT in ehr_chart_summary_agent/.env."
+        )
+
     seed_all(
-        project_id=args.project,
-        location=args.location,
-        dataset_id=args.dataset,
-        fhir_store_id=args.fhir_store,
+        project_id=project_id,
+        location=location,
+        dataset_id=dataset_id,
+        fhir_store_id=fhir_store_id,
     )
 
 

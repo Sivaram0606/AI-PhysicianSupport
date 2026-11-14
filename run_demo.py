@@ -35,6 +35,7 @@ for candidate_env in (
 try:
     from ehr_chart_summary_agent.agent import chart_review_pipeline
     from ehr_chart_summary_agent.clinical_tools import (
+        audit_patient_medications_rxnorm_openfda,
         check_drug_brand_or_generic,
         get_location_outbreak_and_disease_data,
         list_emergency_ward_patients,
@@ -50,6 +51,7 @@ try:
 except ImportError:
     from agent import chart_review_pipeline  # type: ignore
     from clinical_tools import (  # type: ignore
+        audit_patient_medications_rxnorm_openfda,
         check_drug_brand_or_generic,
         get_location_outbreak_and_disease_data,
         list_emergency_ward_patients,
@@ -68,7 +70,6 @@ async def run_live_adk_pipeline(patient_id: str) -> None:
     """Runs the live Google ADK `chart_review_pipeline` using `InMemoryRunner`."""
     from google.adk.runners import InMemoryRunner
 
-    swimlane_info = generate_clinical_swimlane_graph(patient_id)
     runner = InMemoryRunner(
         agent=chart_review_pipeline,
         app_name="ehr_chart_summary_agent",
@@ -80,8 +81,9 @@ async def run_live_adk_pipeline(patient_id: str) -> None:
 
     prompt = (
         f"Generate a complete 1-page longitudinal physician chart brief for patient {patient_id}, "
-        f"including medication Original Drug vs. Brand Name verification, OpenFDA adverse effects, "
-        f"and the Interactive Multi-Track Clinical Swimlane Graph."
+        f"first reviewing Longitudinal Lab Trends, Diagnostic Imaging, Hospitalization Notes & Open Clinical Loops, "
+        f"then generating the Interactive 4-Track Clinical Swimlane Chart, and only after that checking "
+        f"Medications, Original Drug vs. Brand Name verification, and OpenFDA adverse effects."
     )
     print(f"\n[ADK Live Runner] Starting `ehr_chart_summary_agent` pipeline for {patient_id}...\n")
 
@@ -108,12 +110,12 @@ async def run_live_adk_pipeline(patient_id: str) -> None:
         print("\n" + "=" * 92)
         print(final_output)
         print("=" * 92)
-    if swimlane_info.get("status") == "success":
-        print(f"\n[Interactive 4-Track Clinical Swimlane HTML]: {swimlane_info['interactive_html_path']}\n")
 
 
 def run_deterministic_trace(patient_id: str) -> None:
-    """Executes the FHIR-backed multi-agent tool pipeline deterministically."""
+    """Executes the FHIR-backed multi-agent tool pipeline deterministically in sequence."""
+    from concurrent.futures import ThreadPoolExecutor
+
     print("=" * 92)
     print(" GOOGLE ADK EXECUTION TRACE: ehr_chart_summary_agent (HL7 FHIR R4)")
     print("=" * 92)
@@ -128,11 +130,20 @@ def run_deterministic_trace(patient_id: str) -> None:
     visit = intake["todays_visit"]
     vitals = visit.get("triage_vitals_today", {})
 
-    encounters_data = get_hospitalizations_and_clinical_notes(canonical_id)
-    meds_data = get_medication_reconciliation_history(canonical_id)
-    labs_data = get_longitudinal_labs_and_imaging(canonical_id)
-    loops_data = get_open_loops_and_care_gaps(canonical_id)
+    # Step 1: Longitudinal Lab Trends, Diagnostic Imaging, Hospitalization Notes & Open Clinical Loops (Concurrent)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_labs = pool.submit(get_longitudinal_labs_and_imaging, canonical_id)
+        f_enc = pool.submit(get_hospitalizations_and_clinical_notes, canonical_id)
+        f_loops = pool.submit(get_open_loops_and_care_gaps, canonical_id)
+        labs_data = f_labs.result()
+        encounters_data = f_enc.result()
+        loops_data = f_loops.result()
+
+    # Step 2: Interactive 4-Track Clinical Swimlane Chart
     swimlane_data = generate_clinical_swimlane_graph(canonical_id)
+
+    # Step 3: Check Drugs & Adverse Effects (ONLY after Swimlane Charts — concurrent RxNorm + OpenFDA batch)
+    batch_meds = audit_patient_medications_rxnorm_openfda(canonical_id)
 
     print(f"\n# 1-PAGE PHYSICIAN CHART BRIEF: {demo['name'].upper()} ({canonical_id})")
     print(f"**FHIR Source:** {intake['fhir_data_source']} (`Patient/{canonical_id}`)")
@@ -144,37 +155,47 @@ def run_deterministic_trace(patient_id: str) -> None:
     )
     print(f"**Triage Note:** {vitals.get('ma_intake_note', '')}\n")
 
-    print("## 1. Interactive 4-Track Clinical Swimlane Graph")
+    print("## 1. Longitudinal Lab Trends, Diagnostic Imaging, Hospitalization Notes & Open Clinical Loops")
+    for lab in labs_data["labs_and_diagnostics"]["longitudinal_labs"]:
+        traj = " -> ".join(f"{h['value']} [{h['flag']}] ({h['date']})" for h in lab["history"])
+        print(f"- **{lab['test']}** (Ref `{lab['ref_range']}`): {traj}")
+    for enc in encounters_data.get("recent_encounters_and_notes", []):
+        print(f"- **Encounter ({enc.get('date')})**: {enc.get('type')} — {enc.get('primary_diagnosis')}")
+    for idx, item in enumerate(loops_data["unresolved_items_and_care_gaps"], start=1):
+        print(f"- **Open Loop {idx} [{item['priority']}] {item['category']}**: {item['details']}")
+
+    print("\n## 2. Interactive 4-Track Clinical Swimlane Chart")
     print(f"**HTML Viewer:** `{swimlane_data['interactive_html_path']}`\n")
     print(swimlane_data["mermaid_swimlane"])
     print()
     print(swimlane_data["markdown_swimlane_matrix"])
 
-    print("\n## 2. Medications (FHIR Reconciliation + RxNorm Brand/Generic)")
-    for med in meds_data["medications"]["active_prescriptions"]:
-        rx = check_drug_brand_or_generic(med["medication"], med.get("rxcui_code", ""))
+    print("\n## 3. Check Drugs: Medication Reconciliation, Brand/Generic & Adverse Effects")
+    for dup in batch_meds.get("duplicate_active_ingredient_alerts", []):
+        print(f"- **[SAFETY ALERT]** {dup['warning']}")
+    for med in batch_meds.get("active_prescriptions_audited", []):
+        rx = med.get("rxnorm_and_openfda_audit", {})
+        side_fx = rx.get("openfda_known_side_effects", {}).get("top_faers_reported_adverse_events", {})
+        if isinstance(side_fx, dict) and side_fx:
+            top_fx = ", ".join(list(side_fx.keys())[:3])
+        elif isinstance(side_fx, list) and side_fx:
+            top_fx = ", ".join(e.get("reaction", str(e)) if isinstance(e, dict) else str(e) for e in side_fx[:3])
+        else:
+            top_fx = "See OpenFDA label"
         print(
             f"- **{med['medication']}** [{rx.get('classification', 'UNKNOWN')}] — `{med['prescribed_dose']}`\n"
-            f"  - *Change:* {med['change_type']} | *Adherence:* {med['actual_patient_adherence']}"
+            f"  - *Change:* {med['change_type']} | *Adherence:* {med['actual_patient_adherence']}\n"
+            f"  - *Top Adverse Effects (OpenFDA):* {top_fx}"
         )
-    for held in meds_data["medications"]["held_or_discontinued_medications"]:
+    for held in batch_meds.get("held_or_discontinued_medications_audited", []):
         print(
             f"- **[HELD/STOPPED] {held['medication']}** — {held['status']}\n"
             f"  - *Reason:* {held['reason']} | *Restart Criteria:* {held['reinitiation_criteria']}"
         )
 
-    print("\n## 3. Longitudinal Lab Trends")
-    for lab in labs_data["labs_and_diagnostics"]["longitudinal_labs"]:
-        traj = " -> ".join(f"{h['value']} [{h['flag']}] ({h['date']})" for h in lab["history"])
-        print(f"- **{lab['test']}** (Ref `{lab['ref_range']}`): {traj}")
-
-    print("\n## 4. Unresolved Open Loops & Safety Alerts")
-    for idx, item in enumerate(loops_data["unresolved_items_and_care_gaps"], start=1):
-        print(f"{idx}. **[{item['priority']}] {item['category']}**: {item['details']}")
-
     if demo.get("postal_code"):
         zip_surv = get_location_outbreak_and_disease_data(demo["postal_code"])
-        print(f"\n## 5. Hyperlocal ZIP-Code Surveillance ({zip_surv.get('surveillance_granularity')})")
+        print(f"\n## 4. Hyperlocal ZIP-Code Surveillance ({zip_surv.get('surveillance_granularity')})")
         ed = zip_surv.get("active_outbreaks_in_zip_catchment", {}).get("local_emergency_department_trajectories", {})
         for p in ed.get("pathogen_ed_trajectories", []):
             print(f"- **Local ED {p['pathogen']}**: {p['percent_of_local_ed_visits']}% visits (Trend: {p['weekly_outbreak_trend']})")

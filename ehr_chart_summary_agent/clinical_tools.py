@@ -13,18 +13,61 @@ Integrates:
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
+import math
+import os
 import re
+import threading
+import time
 from typing import Any
+from urllib.parse import quote
+
 import requests
+from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
 logger = logging.getLogger(__name__)
 
 # Strict input validation patterns (mandatory-secure-web-skills)
-_PATIENT_ID_RE = re.compile(r"^[A-Za-z0-9._\-]{1,128}$")
+_PATIENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,127}$")
 _SAFE_TEXT_RE = re.compile(r"^[A-Za-z0-9\s.,'()\-/\[\]:]{1,200}$")
 _RXCUI_RE = re.compile(r"^\d{1,12}$")
+
+# Shared connection-pooled HTTPS session for RxNorm, OpenFDA, CDC Socrata & Open-Meteo
+_HTTP_SESSION = requests.Session()
+_HTTP_SESSION.mount("https://", HTTPAdapter(pool_connections=16, pool_maxsize=24))
+
+# Thread-safe TTL caches to eliminate duplicate outbound clinical API round-trips
+_CACHE_LOCK = threading.Lock()
+_ROSTER_CACHE: tuple[float, dict[str, Any]] | None = None
+_DRUG_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_OUTBREAK_CACHE: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
+_ROSTER_TTL_SEC = 90.0
+_DRUG_TTL_SEC = 600.0
+_OUTBREAK_TTL_SEC = 300.0
+
+
+def _sanitize_lucene_term(raw: str) -> str:
+    """Strips Lucene syntax operators and quotes before embedding in OpenFDA phrase queries."""
+    cleaned = re.sub(r"[^a-zA-Z0-9\s.\-]", " ", raw or "")
+    return " ".join(cleaned.split())[:100]
+
+
+def _validate_coords(lat: float | None, lon: float | None) -> tuple[float | None, float | None]:
+    """Validates finite geographic coordinates within WGS84 bounds to prevent SoQL injection."""
+    if lat is None or lon is None:
+        return None, None
+    try:
+        flat, flon = float(lat), float(lon)
+    except (ValueError, TypeError):
+        return None, None
+    if not (math.isfinite(flat) and math.isfinite(flon)):
+        return None, None
+    if not (-90.0 <= flat <= 90.0 and -180.0 <= flon <= 180.0):
+        return None, None
+    return round(flat, 6), round(flon, 6)
+
 
 # US State name <-> 2-letter abbreviation mapping (allow-list for SoQL & FluView queries)
 US_STATES_MAP: dict[str, str] = {
@@ -314,6 +357,12 @@ def list_emergency_ward_patients() -> dict[str, Any]:
     Returns:
         Dictionary containing the list of Emergency Ward patients and FHIR store citation metadata.
     """
+    global _ROSTER_CACHE
+    now = time.monotonic()
+    with _CACHE_LOCK:
+        if _ROSTER_CACHE is not None and (now - _ROSTER_CACHE[0]) < _ROSTER_TTL_SEC:
+            return _ROSTER_CACHE[1]
+
     data_source = "GCP Cloud Healthcare FHIR Store (synthe_data)"
     patient_resources: list[dict[str, Any]] = []
     triage_by_pid: dict[str, str] = {
@@ -327,14 +376,18 @@ def list_emergency_ward_patients() -> dict[str, Any]:
         except ImportError:
             from server import list_active_triage_encounters, list_fhir_patients  # type: ignore
 
-        bundle = list_fhir_patients()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_pats = pool.submit(list_fhir_patients)
+            f_encs = pool.submit(list_active_triage_encounters)
+            bundle = f_pats.result()
+            enc_bundle = f_encs.result()
+
         if bundle and bundle.get("entry"):
             for entry in bundle["entry"]:
                 res = entry.get("resource", {})
                 if res.get("resourceType") == "Patient":
                     patient_resources.append(res)
 
-            enc_bundle = list_active_triage_encounters()
             if enc_bundle and enc_bundle.get("entry"):
                 for entry in enc_bundle["entry"]:
                     eres = entry.get("resource", {})
@@ -344,7 +397,7 @@ def list_emergency_ward_patients() -> dict[str, Any]:
                         if subj and cc:
                             triage_by_pid[subj] = cc
     except Exception as exc:
-        logger.warning("Primary GCP FHIR patient list failed, using fallback: %s", type(exc).__name__)
+        logger.warning("Primary GCP FHIR patient list failed, using fallback (%s).", type(exc).__name__)
 
     if not patient_resources:
         data_source = "Synthea FHIR R4 Emergency Ward Clinical Store (synthe_data fallback)"
@@ -388,7 +441,7 @@ def list_emergency_ward_patients() -> dict[str, Any]:
         )
 
     ward_patients.sort(key=lambda p: p["patient_id"])
-    return {
+    result = {
         "ward_patient_count": len(ward_patients),
         "patients": ward_patients,
         "fhir_data_source": data_source,
@@ -399,6 +452,9 @@ def list_emergency_ward_patients() -> dict[str, Any]:
             }
         ],
     }
+    with _CACHE_LOCK:
+        _ROSTER_CACHE = (time.monotonic(), result)
+    return result
 
 
 def get_patient_clinical_profile(patient_id: str, patient_name: str = "") -> dict[str, Any]:
@@ -439,40 +495,44 @@ def get_patient_clinical_profile(patient_id: str, patient_name: str = "") -> dic
 
     clean_name = patient_name.strip() if patient_name and _SAFE_TEXT_RE.match(patient_name.strip()) else ""
 
-    # 1. Attempt primary GCP Cloud Healthcare FHIR store via existing get_patient_everything
+    # 1. Reuse unified single-flight GCP Cloud Healthcare FHIR store cache + local cohort fallback
     bundle: dict[str, Any] | None = None
     data_source = "GCP Cloud Healthcare FHIR Store (synthe_data)"
     endpoint_url = ""
     try:
         try:
-            from .server import get_patient_everything
+            from .ehr_chart_tools import _fetch_fhir_everything_bundle
         except ImportError:
-            from server import get_patient_everything  # type: ignore
+            from ehr_chart_tools import _fetch_fhir_everything_bundle  # type: ignore
 
-        bundle = get_patient_everything(clean_id)
+        _, bundle, data_source = _fetch_fhir_everything_bundle(clean_id)
     except Exception as exc:
-        logger.warning("Primary GCP FHIR call failed, attempting fallback: %s", type(exc).__name__)
+        logger.warning("Shared FHIR bundle lookup failed (%s).", type(exc).__name__)
 
-    # 2. Fallback to FHIR R4 cohort bundle when GCP credentials require reauthentication
-    if not bundle or "entry" not in bundle:
-        if clean_id in SYNTHEA_FALLBACK_BUNDLES:
-            bundle = SYNTHEA_FALLBACK_BUNDLES[clean_id]
-            data_source = "Synthea FHIR R4 Emergency Ward Clinical Store (synthe_data fallback)"
-        else:
-            try:
-                hapi_url = f"https://hapi.fhir.org/baseR4/Patient/{clean_id}/$everything"
-                resp = requests.get(
-                    hapi_url,
-                    headers={"Accept": "application/fhir+json"},
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    candidate = resp.json()
-                    if candidate.get("entry"):
-                        bundle = candidate
-                        data_source = "Public HAPI FHIR R4 Server"
-            except RequestException:
-                pass
+    if (not bundle or "entry" not in bundle) and clean_id in SYNTHEA_FALLBACK_BUNDLES:
+        bundle = SYNTHEA_FALLBACK_BUNDLES[clean_id]
+        data_source = "Synthea FHIR R4 Emergency Ward Clinical Store (synthe_data fallback)"
+
+    # Security Architecture: Never send private hospital patient IDs to public third-party HAPI servers
+    # unless explicitly opted in for sandbox testing (`ALLOW_PUBLIC_HAPI_FALLBACK=true`).
+    if (
+        (not bundle or "entry" not in bundle)
+        and os.getenv("ALLOW_PUBLIC_HAPI_FALLBACK", "false").strip().lower() == "true"
+    ):
+        try:
+            hapi_url = f"https://hapi.fhir.org/baseR4/Patient/{quote(clean_id, safe='')}/$everything"
+            resp = _HTTP_SESSION.get(
+                hapi_url,
+                headers={"Accept": "application/fhir+json"},
+                timeout=(4, 8),
+            )
+            if resp.status_code == 200:
+                candidate = resp.json()
+                if candidate.get("entry"):
+                    bundle = candidate
+                    data_source = "Public HAPI FHIR R4 Server (Sandbox Opt-In)"
+        except RequestException:
+            pass
 
     if not bundle or "entry" not in bundle:
         return {
@@ -529,6 +589,13 @@ def check_drug_brand_or_generic(
     clean_drug = drug_name.strip()
     clean_rxcui = rxcui_code.strip() if rxcui_code and _RXCUI_RE.match(rxcui_code.strip()) else ""
 
+    cache_key = (clean_drug.lower(), clean_rxcui)
+    now = time.monotonic()
+    with _CACHE_LOCK:
+        cached_hit = _DRUG_CACHE.get(cache_key)
+        if cached_hit is not None and (now - cached_hit[0]) < _DRUG_TTL_SEC:
+            return cached_hit[1]
+
     tty_descriptions = {
         "IN": "Ingredient (Original Generic Active Ingredient)",
         "MIN": "Multiple Ingredients (Original Generic Combination)",
@@ -549,42 +616,45 @@ def check_drug_brand_or_generic(
         resolved_rxcui = clean_rxcui
         if not resolved_rxcui:
             first_token = re.split(r"\s+\d", clean_drug)[0].strip()
-            for candidate_query in (clean_drug, first_token):
-                r_lookup = requests.get(
+            for candidate_query in dict.fromkeys((clean_drug, first_token)):
+                if not candidate_query:
+                    continue
+                r_lookup = _HTTP_SESSION.get(
                     "https://rxnav.nlm.nih.gov/REST/rxcui.json",
                     params={"name": candidate_query, "search": 2},
-                    timeout=10,
+                    timeout=(4, 8),
                 )
                 if r_lookup.status_code == 200:
                     ids = r_lookup.json().get("idGroup", {}).get("rxnormId", [])
-                    if ids:
-                        resolved_rxcui = ids[0]
+                    if ids and _RXCUI_RE.match(str(ids[0])):
+                        resolved_rxcui = str(ids[0])
                         break
 
         props: dict[str, Any] = {}
+        generic_ingredients: list[str] = []
+        brand_equivalents: list[str] = []
+
         rxnorm_props_url = (
             f"https://rxnav.nlm.nih.gov/REST/rxcui/{resolved_rxcui}/properties.json"
             if resolved_rxcui
             else "https://rxnav.nlm.nih.gov/REST/rxcui.json"
         )
-        if resolved_rxcui:
-            r_props = requests.get(rxnorm_props_url, timeout=10)
-            if r_props.status_code == 200:
-                props = r_props.json().get("properties", {}) or {}
-
-        tty = props.get("tty", "")
-        rxnorm_name = props.get("name", clean_drug)
-
-        generic_ingredients: list[str] = []
-        brand_equivalents: list[str] = []
         rxnorm_related_url = (
             f"https://rxnav.nlm.nih.gov/REST/rxcui/{resolved_rxcui}/related.json?tty=IN+MIN+PIN+BN+SCD+SBD"
             if resolved_rxcui
             else "https://rxnav.nlm.nih.gov/REST/"
         )
 
+        # Fetch RxNorm properties and related concepts concurrently over pooled HTTPS
         if resolved_rxcui:
-            r_rel = requests.get(rxnorm_related_url, timeout=10)
+            with ThreadPoolExecutor(max_workers=2) as rx_pool:
+                f_props = rx_pool.submit(_HTTP_SESSION.get, rxnorm_props_url, timeout=(4, 8))
+                f_rel = rx_pool.submit(_HTTP_SESSION.get, rxnorm_related_url, timeout=(4, 8))
+                r_props = f_props.result()
+                r_rel = f_rel.result()
+
+            if r_props.status_code == 200:
+                props = r_props.json().get("properties", {}) or {}
             if r_rel.status_code == 200:
                 concept_groups = r_rel.json().get("relatedGroup", {}).get("conceptGroup", []) or []
                 for cg in concept_groups:
@@ -597,6 +667,11 @@ def check_drug_brand_or_generic(
                             generic_ingredients.append(cname)
                         elif cg_tty == "BN" and cname not in brand_equivalents:
                             brand_equivalents.append(cname)
+
+        tty = props.get("tty", "")
+        rxnorm_name = props.get("name", clean_drug)
+        if tty in ("IN", "MIN", "PIN") and rxnorm_name and not generic_ingredients:
+            generic_ingredients.append(rxnorm_name)
 
         citations.append(
             {
@@ -613,8 +688,8 @@ def check_drug_brand_or_generic(
         is_brand = tty in brand_ttys
         is_generic = tty in generic_ttys
 
-        first_word = clean_drug.split()[0].lower() if clean_drug else ""
-        if not is_brand and any(first_word == b.lower() for b in brand_equivalents):
+        first_word_raw = clean_drug.split()[0].lower() if clean_drug else ""
+        if not is_brand and any(first_word_raw == b.lower() for b in brand_equivalents):
             is_brand = True
             is_generic = False
 
@@ -635,28 +710,64 @@ def check_drug_brand_or_generic(
             classification = "UNKNOWN"
             summary = f"Could not conclusively classify '{clean_drug}' via RxNorm TTY."
 
-        # Step 2: Query OpenFDA Drug APIs (https://open.fda.gov/apis/drug/) for:
-        #   a) Uses of the drug (indications_and_usage, purpose, pharmacologic class, mechanism of action)
-        #   b) Known side effects from FDA Structured Product Labeling (adverse_reactions, warnings_and_cautions, contraindications, boxed_warning)
-        #   c) Top reported FAERS adverse events (drug/event.json)
-        search_ingredient = (generic_ingredients[0] if generic_ingredients else first_word).lower()
-        adverse_events: dict[str, int] = {}
+        # Step 2: Query OpenFDA FAERS & SPL Drug Labeling concurrently with sanitized Lucene terms
+        search_ingredient = _sanitize_lucene_term(
+            (generic_ingredients[0] if generic_ingredients else first_word_raw).lower()
+        )
+        safe_first_word = _sanitize_lucene_term(first_word_raw)
+
         faers_query_url = (
             f'https://api.fda.gov/drug/event.json?search=patient.drug.medicinalproduct:"{search_ingredient}"'
             "&count=patient.reaction.reactionmeddrapt.exact&limit=8"
         )
-        r_fda_events = requests.get(
-            "https://api.fda.gov/drug/event.json",
-            params={
-                "search": f'patient.drug.medicinalproduct:"{search_ingredient}"',
-                "count": "patient.reaction.reactionmeddrapt.exact",
-                "limit": 8,
-            },
-            timeout=10,
-        )
-        if r_fda_events.status_code == 200:
-            for item in r_fda_events.json().get("results", [])[:8]:
-                adverse_events[item.get("term", "UNKNOWN")] = item.get("count", 0)
+
+        def _fetch_faers() -> dict[str, int]:
+            events: dict[str, int] = {}
+            if not search_ingredient:
+                return events
+            r_fda_events = _HTTP_SESSION.get(
+                "https://api.fda.gov/drug/event.json",
+                params={
+                    "search": f'patient.drug.medicinalproduct:"{search_ingredient}"',
+                    "count": "patient.reaction.reactionmeddrapt.exact",
+                    "limit": 8,
+                },
+                timeout=(4, 8),
+            )
+            if r_fda_events.status_code == 200:
+                for item in r_fda_events.json().get("results", [])[:8]:
+                    events[item.get("term", "UNKNOWN")] = item.get("count", 0)
+            return events
+
+        def _fetch_spl_label() -> tuple[dict[str, Any] | None, str]:
+            label_queries: list[str] = []
+            if search_ingredient:
+                label_queries.append(f'openfda.generic_name:"{search_ingredient}"')
+            if safe_first_word and safe_first_word != search_ingredient:
+                label_queries.append(f'openfda.brand_name:"{safe_first_word}"')
+            if search_ingredient:
+                label_queries.append(f'openfda.substance_name:"{search_ingredient}"')
+
+            for label_query in label_queries:
+                r_fda_label = _HTTP_SESSION.get(
+                    "https://api.fda.gov/drug/label.json",
+                    params={"search": label_query, "limit": 1},
+                    timeout=(4, 8),
+                )
+                if r_fda_label.status_code == 200:
+                    label_results = r_fda_label.json().get("results", [])
+                    if label_results:
+                        return (
+                            label_results[0],
+                            f"https://api.fda.gov/drug/label.json?search={label_query}&limit=1",
+                        )
+            return None, "https://api.fda.gov/drug/label.json"
+
+        with ThreadPoolExecutor(max_workers=2) as fda_pool:
+            f_faers = fda_pool.submit(_fetch_faers)
+            f_lbl = fda_pool.submit(_fetch_spl_label)
+            adverse_events = f_faers.result()
+            lbl_obj, used_label_url = f_lbl.result()
 
         citations.append(
             {
@@ -678,47 +789,30 @@ def check_drug_brand_or_generic(
         drug_interactions = None
         spl_set_id = None
         spl_effective_time = None
-        used_label_url = "https://api.fda.gov/drug/label.json"
 
-        # Query OpenFDA Drug Labeling API (https://api.fda.gov/drug/label.json) by generic or brand name
-        for label_query in (
-            f'openfda.generic_name:"{search_ingredient}"',
-            f'openfda.brand_name:"{first_word}"',
-            f'openfda.substance_name:"{search_ingredient}"',
-        ):
-            r_fda_label = requests.get(
-                "https://api.fda.gov/drug/label.json",
-                params={"search": label_query, "limit": 1},
-                timeout=10,
-            )
-            if r_fda_label.status_code == 200:
-                label_results = r_fda_label.json().get("results", [])
-                if label_results:
-                    lbl = label_results[0]
-                    used_label_url = f"https://api.fda.gov/drug/label.json?search={label_query}&limit=1"
-                    spl_set_id = lbl.get("set_id")
-                    spl_effective_time = lbl.get("effective_time")
-                    openfda_meta = lbl.get("openfda", {})
-                    pharmacologic_class = openfda_meta.get("pharm_class_epc", [])
-                    mechanism_of_action = openfda_meta.get("pharm_class_moa", [])
+        if lbl_obj:
+            spl_set_id = lbl_obj.get("set_id")
+            spl_effective_time = lbl_obj.get("effective_time")
+            openfda_meta = lbl_obj.get("openfda", {})
+            pharmacologic_class = openfda_meta.get("pharm_class_epc", [])
+            mechanism_of_action = openfda_meta.get("pharm_class_moa", [])
 
-                    if lbl.get("indications_and_usage"):
-                        indications_and_usage = lbl["indications_and_usage"][0][:600]
-                    if lbl.get("purpose"):
-                        drug_purpose = lbl["purpose"][0][:400]
-                    if lbl.get("adverse_reactions"):
-                        known_side_effects_label = lbl["adverse_reactions"][0][:600]
-                    if lbl.get("warnings_and_cautions"):
-                        warnings_and_cautions = lbl["warnings_and_cautions"][0][:500]
-                    elif lbl.get("warnings"):
-                        warnings_and_cautions = lbl["warnings"][0][:500]
-                    if lbl.get("contraindications"):
-                        contraindications = lbl["contraindications"][0][:400]
-                    if lbl.get("boxed_warning"):
-                        boxed_warning = lbl["boxed_warning"][0][:400]
-                    if lbl.get("drug_interactions"):
-                        drug_interactions = lbl["drug_interactions"][0][:400]
-                    break
+            if lbl_obj.get("indications_and_usage"):
+                indications_and_usage = lbl_obj["indications_and_usage"][0][:600]
+            if lbl_obj.get("purpose"):
+                drug_purpose = lbl_obj["purpose"][0][:400]
+            if lbl_obj.get("adverse_reactions"):
+                known_side_effects_label = lbl_obj["adverse_reactions"][0][:600]
+            if lbl_obj.get("warnings_and_cautions"):
+                warnings_and_cautions = lbl_obj["warnings_and_cautions"][0][:500]
+            elif lbl_obj.get("warnings"):
+                warnings_and_cautions = lbl_obj["warnings"][0][:500]
+            if lbl_obj.get("contraindications"):
+                contraindications = lbl_obj["contraindications"][0][:400]
+            if lbl_obj.get("boxed_warning"):
+                boxed_warning = lbl_obj["boxed_warning"][0][:400]
+            if lbl_obj.get("drug_interactions"):
+                drug_interactions = lbl_obj["drug_interactions"][0][:400]
 
         citations.append(
             {
@@ -736,7 +830,7 @@ def check_drug_brand_or_generic(
             }
         )
 
-        return {
+        result = {
             "prescribed_name_in_fhir": clean_drug,
             "rxcui": resolved_rxcui,
             "rxnorm_normalized_name": rxnorm_name,
@@ -767,9 +861,142 @@ def check_drug_brand_or_generic(
             },
             "citations": citations,
         }
+        with _CACHE_LOCK:
+            _DRUG_CACHE[cache_key] = (time.monotonic(), result)
+        return result
 
     except RequestException as exc:
-        return {"error": f"Network error querying RxNorm/OpenFDA: {exc}"}
+        return {"error": f"Network error querying RxNorm/OpenFDA ({type(exc).__name__})."}
+
+
+def get_drug_adverse_events_faers(drug_name: str) -> dict[str, Any]:
+    """
+    Retrieves the top 10 reported adverse effects for a given drug directly from OpenFDA FAERS
+    using a pooled HTTPS client, input validation, and Lucene sanitization.
+    """
+    if not isinstance(drug_name, str) or not _SAFE_TEXT_RE.match(drug_name.strip()):
+        return {"error": "Invalid drug_name format."}
+
+    sanitized_term = _sanitize_lucene_term(drug_name.strip().lower())
+    if not sanitized_term:
+        return {"error": "Invalid drug_name provided."}
+
+    try:
+        resp = _HTTP_SESSION.get(
+            "https://api.fda.gov/drug/event.json",
+            params={
+                "search": f'patient.drug.medicinalproduct:"{sanitized_term}"',
+                "count": "patient.reaction.reactionmeddrapt.exact",
+                "limit": 10,
+            },
+            timeout=(4, 8),
+        )
+        if resp.status_code == 200:
+            results = resp.json().get("results", [])
+            if results:
+                return {
+                    item.get("term", "Unknown Effect"): int(item.get("count", 0))
+                    for item in results[:10]
+                }
+            return {"error": f"Unable to retrieve adverse effects for '{sanitized_term}'."}
+        return {"error": f"OpenFDA API returned HTTP {resp.status_code}."}
+    except RequestException as exc:
+        return {"error": f"OpenFDA network error ({type(exc).__name__})."}
+
+
+def audit_patient_medications_rxnorm_openfda(patient_id: str) -> dict[str, Any]:
+    """
+    High-efficiency compound medication & adverse-effects auditor for a patient:
+    1. Fetches longitudinal FHIR `MedicationRequest` reconciliation (active, held, and stopped prescriptions,
+       dose changes, restart thresholds, and real-world adherence barriers).
+    2. Executes `check_drug_brand_or_generic` concurrently across ALL patient medications via a thread pool
+       to classify ORIGINAL_GENERIC_NAME vs. BRAND_NAME (NIH RxNorm) and retrieve OpenFDA SPL indications,
+       boxed warnings, contraindications, and FAERS adverse event counts in a single tool call.
+    3. Deterministically flags duplicate active ingredient therapy across concurrent prescriptions
+       (e.g., OTC brand Tylenol + generic Acetaminophen).
+
+    Args:
+        patient_id: Patient FHIR ID (`pat-001` through `pat-007`, legacy `PAT-1001`, or patient name).
+
+    Returns:
+        Consolidated medication reconciliation, RxNorm Brand/Generic audit, duplicate ingredient alerts,
+        OpenFDA adverse effects, and full FHIR + API citations.
+    """
+    try:
+        from .ehr_chart_tools import get_medication_reconciliation_history
+    except ImportError:
+        from ehr_chart_tools import get_medication_reconciliation_history  # type: ignore
+
+    med_hist = get_medication_reconciliation_history(patient_id)
+    if med_hist.get("status") != "success":
+        return {"status": "error", "message": med_hist.get("message", "Patient not found in FHIR store.")}
+
+    canonical_id = med_hist["patient_id"]
+    active_meds = med_hist.get("medications", {}).get("active_prescriptions", [])
+    held_or_stopped = med_hist.get("medications", {}).get("held_or_discontinued_medications", [])
+
+    unique_specs: dict[str, str] = {}
+    for m in active_meds:
+        unique_specs.setdefault(m["medication"], m.get("rxcui_code") or "")
+    for h in held_or_stopped:
+        unique_specs.setdefault(h["medication"], h.get("rxcui_code") or "")
+
+    rx_map: dict[str, dict[str, Any]] = {}
+    if unique_specs:
+        with ThreadPoolExecutor(max_workers=min(8, len(unique_specs))) as pool:
+            futs = {
+                m_name: pool.submit(check_drug_brand_or_generic, m_name, rxcui)
+                for m_name, rxcui in unique_specs.items()
+            }
+            for m_name, fut in futs.items():
+                rx_map[m_name] = fut.result()
+
+    # Deterministically detect duplicate active ingredients (active+active and active+leftover/held brand-generic pairs)
+    ingredient_to_entries: dict[str, list[tuple[str, bool]]] = {}
+    enriched_active: list[dict[str, Any]] = []
+    for m in active_meds:
+        rx = rx_map.get(m["medication"], {})
+        for ing in rx.get("original_generic_ingredients", []):
+            ing_key = ing.strip().lower()
+            if ing_key:
+                ingredient_to_entries.setdefault(ing_key, []).append((f"{m['medication']} [ACTIVE]", True))
+        enriched_active.append({**m, "rxnorm_and_openfda_audit": rx})
+
+    enriched_held: list[dict[str, Any]] = []
+    for h in held_or_stopped:
+        rx = rx_map.get(h["medication"], {})
+        for ing in rx.get("original_generic_ingredients", []):
+            ing_key = ing.strip().lower()
+            if ing_key:
+                ingredient_to_entries.setdefault(ing_key, []).append(
+                    (f"{h['medication']} [{h.get('status', 'STOPPED/HELD')}]", False)
+                )
+        enriched_held.append({**h, "rxnorm_and_openfda_audit": rx})
+
+    duplicate_alerts = [
+        {
+            "shared_active_ingredient": ing,
+            "concurrent_medications": [label for label, _ in entries],
+            "warning": (
+                f"DUPLICATE ACTIVE INGREDIENT HAZARD: Chart medications ({', '.join(label for label, _ in entries)}) "
+                f"share active ingredient '{ing}', risking cumulative dose toxicity if taken concurrently."
+            ),
+        }
+        for ing, entries in ingredient_to_entries.items()
+        if len(entries) > 1 and any(is_act for _, is_act in entries)
+    ]
+
+    return {
+        "status": "success",
+        "patient_id": canonical_id,
+        "patient_name": med_hist.get("patient_name", canonical_id),
+        "fhir_data_source": med_hist.get("fhir_data_source", ""),
+        "duplicate_active_ingredient_alerts": duplicate_alerts,
+        "active_prescriptions_audited": enriched_active,
+        "held_or_discontinued_medications_audited": enriched_held,
+        "fhir_citations": med_hist.get("citations", []),
+    }
+
 
 
 _ZIP_CODE_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
@@ -788,7 +1015,7 @@ def _fetch_local_sewershed_pathogen(
     pathogen_label: str, dataset_id: str, local_fips: str, zip5: str
 ) -> dict[str, Any] | None:
     """Queries CDC NWSS for the local wastewater sewershed serving the patient's ZIP code."""
-    if not local_fips or not local_fips.isdigit():
+    if not local_fips or not re.fullmatch(r"\d{5}", local_fips):
         return None
     soql_where = f"county_fips like '%{local_fips}%'"
     endpoint_url = (
@@ -796,14 +1023,14 @@ def _fetch_local_sewershed_pathogen(
         f"?$where=county_fips%20like%20%27%25{local_fips}%25%27&$order=sample_collect_date%20DESC&$limit=2"
     )
     try:
-        resp = requests.get(
+        resp = _HTTP_SESSION.get(
             f"https://data.cdc.gov/resource/{dataset_id}.json",
             params={
                 "$where": soql_where,
                 "$order": "sample_collect_date DESC",
                 "$limit": 2,
             },
-            timeout=8,
+            timeout=(4, 8),
         )
         if resp.status_code != 200:
             return None
@@ -884,8 +1111,6 @@ def get_location_outbreak_and_disease_data(
         Dictionary containing strictly ZIP-code-level active outbreak signals, local sewershed
         pathogen detections, persistent diseases inside that ZIP code, hyperlocal air quality, and citations.
     """
-    from concurrent.futures import ThreadPoolExecutor
-
     if not postal_code or not _ZIP_CODE_RE.match(postal_code.strip()):
         return {
             "error": (
@@ -896,206 +1121,229 @@ def get_location_outbreak_and_disease_data(
 
     zip5 = postal_code.strip()[:5]
     clean_city = city.strip() if city and _SAFE_TEXT_RE.match(city.strip()) else ""
-    citations: list[dict[str, Any]] = []
+    resolved_lat, resolved_lon = _validate_coords(latitude, longitude)
 
-    # 1. Exact 5-Digit ZIP Code (ZCTA5) Persistent Disease Surveillance via CDC PLACES (qnzd-25i4)
-    zip_persistent_diseases: list[dict[str, Any]] = []
-    zip_total_pop: int | None = None
-    zip_adult_pop: int | None = None
-    resolved_lat: float | None = float(latitude) if latitude is not None else None
-    resolved_lon: float | None = float(longitude) if longitude is not None else None
+    cache_key = (
+        zip5,
+        f"{resolved_lat:.4f}" if resolved_lat is not None else "",
+        f"{resolved_lon:.4f}" if resolved_lon is not None else "",
+        clean_city.lower(),
+    )
+    now = time.monotonic()
+    with _CACHE_LOCK:
+        cached_entry = _OUTBREAK_CACHE.get(cache_key)
+        if cached_entry and (now - cached_entry[0]) < _OUTBREAK_TTL_SEC:
+            return dict(cached_entry[1])
+
+    citations: list[dict[str, Any]] = []
 
     places_zcta_url = (
         f"https://data.cdc.gov/resource/qnzd-25i4.json"
         f"?locationname={zip5}&datavaluetypeid=CrdPrv&$limit=50"
     )
-    try:
-        r_places = requests.get(
-            "https://data.cdc.gov/resource/qnzd-25i4.json",
-            params={
-                "locationname": zip5,
-                "datavaluetypeid": "CrdPrv",
-                "$limit": 50,
-            },
-            timeout=10,
-        )
-        if r_places.status_code == 200:
-            zcta_rows = r_places.json()
-            for row in zcta_rows:
-                if zip_total_pop is None and row.get("totalpopulation"):
-                    try:
-                        zip_total_pop = int(float(row["totalpopulation"]))
-                    except (ValueError, TypeError):
-                        pass
-                if zip_adult_pop is None and row.get("totalpop18plus"):
-                    try:
-                        zip_adult_pop = int(float(row["totalpop18plus"]))
-                    except (ValueError, TypeError):
-                        pass
-                if (resolved_lat is None or resolved_lon is None) and row.get("geolocation"):
-                    coords = row["geolocation"].get("coordinates", [])
-                    if len(coords) == 2:
-                        resolved_lon, resolved_lat = float(coords[0]), float(coords[1])
 
-                if row.get("categoryid") == "HLTHOUT":
-                    try:
-                        prev_val = float(row.get("data_value") or 0.0)
-                    except (ValueError, TypeError):
-                        prev_val = 0.0
-                    zip_persistent_diseases.append(
-                        {
-                            "zip_code": zip5,
-                            "condition": row.get("measure"),
-                            "short_name": row.get("short_question_text"),
-                            "measure_id": row.get("measureid"),
-                            "prevalence_in_zip_percent": prev_val,
-                            "confidence_interval_95": f"{row.get('low_confidence_limit')}% - {row.get('high_confidence_limit')}%",
-                            "data_year": row.get("year"),
-                        }
-                    )
-            zip_persistent_diseases.sort(
-                key=lambda x: x["prevalence_in_zip_percent"], reverse=True
+    def _fetch_places_zcta() -> tuple[list[dict[str, Any]], int | None, int | None, float | None, float | None, dict[str, Any] | None]:
+        diseases: list[dict[str, Any]] = []
+        tot_pop: int | None = None
+        adult_pop: int | None = None
+        plat: float | None = None
+        plon: float | None = None
+        try:
+            r_places = _HTTP_SESSION.get(
+                "https://data.cdc.gov/resource/qnzd-25i4.json",
+                params={
+                    "locationname": zip5,
+                    "datavaluetypeid": "CrdPrv",
+                    "$limit": 50,
+                },
+                timeout=(4, 7),
             )
-            citations.append(
-                {
+            if r_places.status_code == 200:
+                zcta_rows = r_places.json()
+                for row in zcta_rows:
+                    if tot_pop is None and row.get("totalpopulation"):
+                        try:
+                            tot_pop = int(float(row["totalpopulation"]))
+                        except (ValueError, TypeError):
+                            pass
+                    if adult_pop is None and row.get("totalpop18plus"):
+                        try:
+                            adult_pop = int(float(row["totalpop18plus"]))
+                        except (ValueError, TypeError):
+                            pass
+                    if (plat is None or plon is None) and row.get("geolocation"):
+                        coords = row["geolocation"].get("coordinates", [])
+                        if len(coords) == 2:
+                            plat, plon = _validate_coords(coords[1], coords[0])
+
+                    if row.get("categoryid") == "HLTHOUT":
+                        try:
+                            prev_val = float(row.get("data_value") or 0.0)
+                        except (ValueError, TypeError):
+                            prev_val = 0.0
+                        diseases.append(
+                            {
+                                "zip_code": zip5,
+                                "condition": row.get("measure"),
+                                "short_name": row.get("short_question_text"),
+                                "measure_id": row.get("measureid"),
+                                "prevalence_in_zip_percent": prev_val,
+                                "confidence_interval_95": f"{row.get('low_confidence_limit')}% - {row.get('high_confidence_limit')}%",
+                                "data_year": row.get("year"),
+                            }
+                        )
+                diseases.sort(key=lambda x: x["prevalence_in_zip_percent"], reverse=True)
+                cit = {
                     "information_covered": f"Persistent Chronic & Endemic Disease Prevalence Strictly Inside ZIP Code {zip5} (ZCTA5)",
                     "source_name": f"CDC PLACES: ZCTA5 (ZIP Code Tabulation Area) Health Data (qnzd-25i4) — ZIP {zip5}",
                     "zip_code": zip5,
                     "api_endpoint_url": places_zcta_url,
                     "dataset_about_url": "https://data.cdc.gov/500-Cities-Places/PLACES-ZCTA-Data-GIS-Friendly-Format-2024-release/qnzd-25i4/about_data",
                 }
-            )
-    except RequestException as exc:
-        logger.warning("CDC PLACES ZCTA5 API error for ZIP %s: %s", zip5, exc)
-
-    # Fallback coordinate lookup for the 5-digit ZIP code if still needed
-    if resolved_lat is None or resolved_lon is None:
-        try:
-            r_zip = requests.get(f"https://api.zippopotam.us/us/{zip5}", timeout=6)
-            if r_zip.status_code == 200:
-                places_list = r_zip.json().get("places", [])
-                if places_list:
-                    resolved_lat = float(places_list[0]["latitude"])
-                    resolved_lon = float(places_list[0]["longitude"])
-                    if not clean_city:
-                        clean_city = places_list[0].get("place name", "")
-        except (RequestException, ValueError, KeyError):
-            pass
-
-    # 2. Resolve the exact local Census Tract & 5-digit catchment FIPS physically containing ZIP code `zip5`
-    local_fips = ""
-    local_census_tract = ""
-    if resolved_lat is not None and resolved_lon is not None:
-        try:
-            r_tract = requests.get(
-                "https://data.cdc.gov/resource/cwsq-ngmh.json",
-                params={
-                    "$where": f"within_circle(geolocation, {resolved_lat}, {resolved_lon}, 6000)",
-                    "$limit": 1,
-                },
-                timeout=8,
-            )
-            if r_tract.status_code == 200:
-                tract_rows = r_tract.json()
-                if tract_rows:
-                    local_fips = str(tract_rows[0].get("countyfips", "")).zfill(5)
-                    local_census_tract = str(tract_rows[0].get("locationid", ""))
+                return diseases, tot_pop, adult_pop, plat, plon, cit
         except RequestException as exc:
-            logger.warning("CDC Census Tract spatial lookup failed for ZIP %s: %s", zip5, exc)
+            logger.warning("CDC PLACES ZCTA5 API error for ZIP %s: %s", zip5, type(exc).__name__)
+        return diseases, tot_pop, adult_pop, plat, plon, None
 
-    # 3. Query Local Hospital ED Outbreak Trajectories (rdmq-nq56) + Local Sewershed Pathogens (NWSS) + ZIP Air Quality concurrently
-    local_ed_outbreaks: dict[str, Any] = {}
-    local_sewershed_outbreaks: list[dict[str, Any]] = []
-    environmental_context: dict[str, Any] = {}
+    # Fast coordinate resolution (<150ms via cohort spec or zippopotam) so FIPS/ED/NWSS/AQI don't wait on qnzd-25i4
+    if resolved_lat is None or resolved_lon is None:
+        for spec in RAW_COHORT_SPECS:
+            if spec.get("postal_code") == zip5:
+                resolved_lat, resolved_lon = _validate_coords(spec.get("lat"), spec.get("lon"))
+                if not clean_city and spec.get("city"):
+                    clean_city = str(spec["city"])
+                break
 
-    def _fetch_local_ed() -> dict[str, Any]:
-        if not local_fips or not local_fips.isdigit():
-            return {}
-        ed_url = f"https://data.cdc.gov/resource/rdmq-nq56.json?fips={local_fips}&$order=week_end%20DESC&$limit=2"
-        try:
-            r_ed = requests.get(
-                "https://data.cdc.gov/resource/rdmq-nq56.json",
-                params={
-                    "fips": local_fips,
-                    "$order": "week_end DESC",
-                    "$limit": 2,
-                },
-                timeout=8,
-            )
-            if r_ed.status_code == 200 and r_ed.json():
-                latest_ed = r_ed.json()[0]
-                ed_cit = {
-                    "information_covered": f"Local Hospital Emergency Department Respiratory Outbreak Trajectories Serving ZIP Code {zip5}",
-                    "source_name": f"CDC NSSP Local Emergency Department Surveillance (rdmq-nq56) — Local Catchment for ZIP {zip5}",
-                    "week_ending": str(latest_ed.get("week_end", ""))[:10],
-                    "api_endpoint_url": ed_url,
-                    "dataset_about_url": "https://data.cdc.gov/Public-Health-Surveillance/NSSP-Emergency-Department-Visit-Trajectories-by-St/rdmq-nq56/about_data",
-                }
-                return {
-                    "zip_code_served": zip5,
-                    "week_ending": str(latest_ed.get("week_end", ""))[:10],
-                    "pathogen_ed_trajectories": [
-                        {
-                            "pathogen": "Influenza",
-                            "percent_of_local_ed_visits": float(latest_ed.get("percent_visits_influenza") or 0.0),
-                            "weekly_outbreak_trend": latest_ed.get("ed_trends_influenza", "Unknown"),
-                        },
-                        {
-                            "pathogen": "COVID-19",
-                            "percent_of_local_ed_visits": float(latest_ed.get("percent_visits_covid") or 0.0),
-                            "weekly_outbreak_trend": latest_ed.get("ed_trends_covid", "Unknown"),
-                        },
-                        {
-                            "pathogen": "RSV",
-                            "percent_of_local_ed_visits": float(latest_ed.get("percent_visits_rsv") or 0.0),
-                            "weekly_outbreak_trend": latest_ed.get("ed_trends_rsv", "Unknown"),
-                        },
-                    ],
-                    "citation": ed_cit,
-                }
-        except (RequestException, ValueError):
-            pass
-        return {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        fut_places = pool.submit(_fetch_places_zcta)
 
-    def _fetch_zip_air_quality() -> dict[str, Any]:
         if resolved_lat is None or resolved_lon is None:
-            return {}
-        aq_url = (
-            f"https://air-quality-api.open-meteo.com/v1/air-quality"
-            f"?latitude={resolved_lat}&longitude={resolved_lon}&current=us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide"
-        )
-        try:
-            r_aq = requests.get(
-                "https://air-quality-api.open-meteo.com/v1/air-quality",
-                params={
-                    "latitude": resolved_lat,
-                    "longitude": resolved_lon,
-                    "current": "us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide",
-                },
-                timeout=8,
-            )
-            if r_aq.status_code == 200:
-                curr = r_aq.json().get("current", {})
-                aq_cit = {
-                    "information_covered": f"Hyperlocal Air Quality & Respiratory Triggers in ZIP Code {zip5}",
-                    "source_name": f"Open-Meteo Hyperlocal Air Quality API — ZIP {zip5} ({resolved_lat}, {resolved_lon})",
-                    "api_endpoint_url": aq_url,
-                    "documentation_url": "https://open-meteo.com/en/docs/air-quality-api",
-                }
-                return {
-                    "zip_code": zip5,
-                    "us_aqi": curr.get("us_aqi"),
-                    "pm2_5_ug_m3": curr.get("pm2_5"),
-                    "pm10_ug_m3": curr.get("pm10"),
-                    "ozone_ug_m3": curr.get("ozone"),
-                    "nitrogen_dioxide_ug_m3": curr.get("nitrogen_dioxide"),
-                    "citation": aq_cit,
-                }
-        except RequestException:
-            pass
-        return {}
+            try:
+                r_zip = _HTTP_SESSION.get(f"https://api.zippopotam.us/us/{zip5}", timeout=(3, 5))
+                if r_zip.status_code == 200:
+                    places_list = r_zip.json().get("places", [])
+                    if places_list:
+                        resolved_lat, resolved_lon = _validate_coords(
+                            places_list[0].get("latitude"),
+                            places_list[0].get("longitude"),
+                        )
+                        if not clean_city:
+                            raw_city = str(places_list[0].get("place name", "")).strip()
+                            if _SAFE_TEXT_RE.match(raw_city):
+                                clean_city = raw_city
+            except (RequestException, ValueError, KeyError):
+                pass
 
-    with ThreadPoolExecutor(max_workers=7) as pool:
+        # Resolve the exact local Census Tract & 5-digit catchment FIPS physically containing ZIP code `zip5`
+        local_fips = ""
+        local_census_tract = ""
+        if resolved_lat is not None and resolved_lon is not None:
+            try:
+                r_tract = _HTTP_SESSION.get(
+                    "https://data.cdc.gov/resource/cwsq-ngmh.json",
+                    params={
+                        "$where": f"within_circle(geolocation, {resolved_lat}, {resolved_lon}, 6000)",
+                        "$limit": 1,
+                    },
+                    timeout=(4, 6),
+                )
+                if r_tract.status_code == 200:
+                    tract_rows = r_tract.json()
+                    if tract_rows:
+                        candidate_fips = str(tract_rows[0].get("countyfips", "")).strip().zfill(5)
+                        if re.fullmatch(r"\d{5}", candidate_fips):
+                            local_fips = candidate_fips
+                        local_census_tract = str(tract_rows[0].get("locationid", ""))
+            except RequestException as exc:
+                logger.warning("CDC Census Tract spatial lookup failed for ZIP %s: %s", zip5, type(exc).__name__)
+
+        def _fetch_local_ed() -> dict[str, Any]:
+            if not local_fips or not re.fullmatch(r"\d{5}", local_fips):
+                return {}
+            ed_url = f"https://data.cdc.gov/resource/rdmq-nq56.json?fips={local_fips}&$order=week_end%20DESC&$limit=2"
+            try:
+                r_ed = _HTTP_SESSION.get(
+                    "https://data.cdc.gov/resource/rdmq-nq56.json",
+                    params={
+                        "fips": local_fips,
+                        "$order": "week_end DESC",
+                        "$limit": 2,
+                    },
+                    timeout=(4, 7),
+                )
+                if r_ed.status_code == 200 and r_ed.json():
+                    latest_ed = r_ed.json()[0]
+                    ed_cit = {
+                        "information_covered": f"Local Hospital Emergency Department Respiratory Outbreak Trajectories Serving ZIP Code {zip5}",
+                        "source_name": f"CDC NSSP Local Emergency Department Surveillance (rdmq-nq56) — Local Catchment for ZIP {zip5}",
+                        "week_ending": str(latest_ed.get("week_end", ""))[:10],
+                        "api_endpoint_url": ed_url,
+                        "dataset_about_url": "https://data.cdc.gov/Public-Health-Surveillance/NSSP-Emergency-Department-Visit-Trajectories-by-St/rdmq-nq56/about_data",
+                    }
+                    return {
+                        "zip_code_served": zip5,
+                        "week_ending": str(latest_ed.get("week_end", ""))[:10],
+                        "pathogen_ed_trajectories": [
+                            {
+                                "pathogen": "Influenza",
+                                "percent_of_local_ed_visits": float(latest_ed.get("percent_visits_influenza") or 0.0),
+                                "weekly_outbreak_trend": latest_ed.get("ed_trends_influenza", "Unknown"),
+                            },
+                            {
+                                "pathogen": "COVID-19",
+                                "percent_of_local_ed_visits": float(latest_ed.get("percent_visits_covid") or 0.0),
+                                "weekly_outbreak_trend": latest_ed.get("ed_trends_covid", "Unknown"),
+                            },
+                            {
+                                "pathogen": "RSV",
+                                "percent_of_local_ed_visits": float(latest_ed.get("percent_visits_rsv") or 0.0),
+                                "weekly_outbreak_trend": latest_ed.get("ed_trends_rsv", "Unknown"),
+                            },
+                        ],
+                        "citation": ed_cit,
+                    }
+            except (RequestException, ValueError):
+                pass
+            return {}
+
+        def _fetch_zip_air_quality() -> dict[str, Any]:
+            if resolved_lat is None or resolved_lon is None:
+                return {}
+            aq_url = (
+                f"https://air-quality-api.open-meteo.com/v1/air-quality"
+                f"?latitude={resolved_lat}&longitude={resolved_lon}&current=us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide"
+            )
+            try:
+                r_aq = _HTTP_SESSION.get(
+                    "https://air-quality-api.open-meteo.com/v1/air-quality",
+                    params={
+                        "latitude": resolved_lat,
+                        "longitude": resolved_lon,
+                        "current": "us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide",
+                    },
+                    timeout=(4, 7),
+                )
+                if r_aq.status_code == 200:
+                    curr = r_aq.json().get("current", {})
+                    aq_cit = {
+                        "information_covered": f"Hyperlocal Air Quality & Respiratory Triggers in ZIP Code {zip5}",
+                        "source_name": f"Open-Meteo Hyperlocal Air Quality API — ZIP {zip5} ({resolved_lat}, {resolved_lon})",
+                        "api_endpoint_url": aq_url,
+                        "documentation_url": "https://open-meteo.com/en/docs/air-quality-api",
+                    }
+                    return {
+                        "zip_code": zip5,
+                        "us_aqi": curr.get("us_aqi"),
+                        "pm2_5_ug_m3": curr.get("pm2_5"),
+                        "pm10_ug_m3": curr.get("pm10"),
+                        "ozone_ug_m3": curr.get("ozone"),
+                        "nitrogen_dioxide_ug_m3": curr.get("nitrogen_dioxide"),
+                        "citation": aq_cit,
+                    }
+            except RequestException:
+                pass
+            return {}
+
         fut_ed = pool.submit(_fetch_local_ed)
         fut_aq = pool.submit(_fetch_zip_air_quality)
         fut_nwss = [
@@ -1103,10 +1351,17 @@ def get_location_outbreak_and_disease_data(
             for p_name, ds_id in _NWSS_PATHOGEN_DATASETS
         ]
 
+        zip_persistent_diseases, zip_total_pop, zip_adult_pop, plat, plon, places_cit = fut_places.result()
+        if resolved_lat is None or resolved_lon is None:
+            resolved_lat, resolved_lon = plat, plon
+        if places_cit:
+            citations.append(places_cit)
+
         local_ed_outbreaks = fut_ed.result()
         if local_ed_outbreaks.get("citation"):
             citations.append(local_ed_outbreaks["citation"])
 
+        local_sewershed_outbreaks: list[dict[str, Any]] = []
         for f in fut_nwss:
             item = f.result()
             if item:
@@ -1117,7 +1372,7 @@ def get_location_outbreak_and_disease_data(
         if environmental_context.get("citation"):
             citations.append(environmental_context["citation"])
 
-    return {
+    result_payload = {
         "surveillance_granularity": f"STRICTLY PATIENT ZIP CODE ONLY (ZIP {zip5})",
         "patient_zip_location": {
             "zip_code": zip5,
@@ -1136,5 +1391,8 @@ def get_location_outbreak_and_disease_data(
         "zip_code_air_quality": environmental_context,
         "citations": citations,
     }
+    with _CACHE_LOCK:
+        _OUTBREAK_CACHE[cache_key] = (time.monotonic(), result_payload)
+    return dict(result_payload)
 
 
