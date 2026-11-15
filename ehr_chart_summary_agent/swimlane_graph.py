@@ -16,7 +16,9 @@ Produces:
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -295,10 +297,18 @@ def generate_interactive_swimlane_html(
     if not _SAFE_FILENAME_RE.match(clean_pid):
         raise ValueError("Invalid patient_id for swimlane output filename.")
 
-    pkg_dir = Path(__file__).resolve().parent
-    base_dir = pkg_dir.parent if pkg_dir.name == "ehr_chart_summary_agent" else pkg_dir
-    outputs_root = (base_dir / "outputs").resolve()
-    outputs_root.mkdir(parents=True, exist_ok=True)
+    custom_out = os.getenv("SWIMLANE_OUTPUT_DIR", "").strip()
+    if custom_out:
+        outputs_root = Path(custom_out).resolve()
+    else:
+        pkg_dir = Path(__file__).resolve().parent
+        base_dir = pkg_dir.parent if pkg_dir.name == "ehr_chart_summary_agent" else pkg_dir
+        outputs_root = (base_dir / "outputs").resolve()
+    try:
+        outputs_root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        outputs_root = (Path(tempfile.gettempdir()) / "swimlane_outputs").resolve()
+        outputs_root.mkdir(parents=True, exist_ok=True)
     target_path = (outputs_root / f"clinical_swimlane_{clean_pid}.html").resolve()
     if outputs_root not in target_path.parents:
         raise ValueError("Output path traversal blocked.")

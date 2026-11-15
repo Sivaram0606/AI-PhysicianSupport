@@ -1,0 +1,26 @@
+# Secrets & Local Env
+.env
+*.env
+!.env.example
+
+# Virtual Environments & Caches
+.venv/
+venv/
+ENV/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Git & IDE Metadata
+.git/
+.gitignore
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local ADK & Pre-generated Outputs
+.adk/
+outputs/*.html
+temp.ipynb

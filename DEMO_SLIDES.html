@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Physician Emergency Support — Executive &amp; Live Demo Slide Deck</title>
+  <style>
+    :root {
+      --bg: #070d19;
+      --slide-bg: #0f172a;
+      --card-bg: #162036;
+      --card-alt: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --blue: #38bdf8;
+      --blue-strong: #2563eb;
+      --emerald: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --violet: #a78bfa;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: radial-gradient(circle at 15% 15%, #13213d 0%, var(--bg) 65%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.7rem 1.6rem;
+      background: rgba(15, 23, 42, 0.88);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+      font-size: 0.84rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 0.18rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .pill-blue { background: rgba(56, 189, 248, 0.15); color: var(--blue); border: 1px solid rgba(56, 189, 248, 0.35); }
+    .pill-green { background: rgba(52, 211, 153, 0.15); color: var(--emerald); border: 1px solid rgba(52, 211, 153, 0.35); }
+    .pill-amber { background: rgba(251, 191, 36, 0.15); color: var(--amber); border: 1px solid rgba(251, 191, 36, 0.35); }
+    .pill-red { background: rgba(251, 113, 133, 0.16); color: var(--rose); border: 1px solid rgba(251, 113, 133, 0.38); }
+    .pill-violet { background: rgba(167, 139, 250, 0.16); color: var(--violet); border: 1px solid rgba(167, 139, 250, 0.38); }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    button.ctrl-btn {
+      background: var(--card-alt);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 0.38rem 0.78rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    button.ctrl-btn:hover { border-color: var(--blue); color: var(--blue); }
+    button.ctrl-btn.active { background: var(--blue-strong); border-color: var(--blue); color: #fff; }
+
+    .progress-track {
+      height: 3px;
+      background: #1e293b;
+      width: 100%;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--blue), var(--emerald));
+      width: 10%;
+      transition: width 0.25s ease;
+    }
+
+    .stage-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.4rem 2rem;
+      gap: 1rem;
+    }
+
+    .slide {
+      display: none;
+      width: 100%;
+      max-width: 1220px;
+      min-height: 620px;
+      background: linear-gradient(165deg, rgba(15, 23, 42, 0.97), rgba(11, 18, 34, 0.98));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 2.6rem 3rem;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .slide.active { display: flex; }
+
+    .slide-header { margin-bottom: 1.2rem; }
+    .slide-kicker {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--blue);
+      margin-bottom: 0.45rem;
+    }
+    h1 {
+      font-size: 2.55rem;
+      line-height: 1.15;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.8rem;
+    }
+    h2 {
+      font-size: 1.85rem;
+      line-height: 1.22;
+      font-weight: 800;
+      letter-spacing: -0.015em;
+    }
+    p.lead {
+      font-size: 1.08rem;
+      line-height: 1.55;
+      color: var(--muted);
+      max-width: 920px;
+    }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.15rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.15rem 1.25rem;
+    }
+    .card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 0.45rem;
+      color: var(--text);
+    }
+    .card p, .card li {
+      font-size: 0.88rem;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+    .card ul { padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+    .card b { color: var(--text); }
+
+    .card-highlight-red { border-color: rgba(251, 113, 133, 0.55); background: rgba(251, 113, 133, 0.07); }
+    .card-highlight-blue { border-color: rgba(56, 189, 248, 0.5); background: rgba(56, 189, 248, 0.07); }
+    .card-highlight-green { border-color: rgba(52, 211, 153, 0.5); background: rgba(52, 211, 153, 0.07); }
+    .card-highlight-amber { border-color: rgba(251, 191, 36, 0.5); background: rgba(251, 191, 36, 0.07); }
+
+    .step-flow {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.85rem;
+      margin: 0.6rem 0;
+    }
+    .step-box {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--blue);
+      border-radius: 12px;
+      padding: 1rem 1.05rem;
+    }
+    .step-box.amber { border-top-color: var(--amber); }
+    .step-box.red { border-top-color: var(--rose); }
+    .step-box.green { border-top-color: var(--emerald); }
+    .step-num { font-size: 0.73rem; font-weight: 800; color: var(--blue); letter-spacing: 0.07em; text-transform: uppercase; }
+    .step-title { font-size: 0.96rem; font-weight: 700; margin: 0.3rem 0 0.4rem; }
+    .step-desc { font-size: 0.82rem; color: var(--muted); line-height: 1.45; }
+
+    table.cohort-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    table.cohort-table th, table.cohort-table td {
+      padding: 0.58rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+    table.cohort-table th {
+      color: var(--blue);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: rgba(30, 41, 59, 0.6);
+    }
+    table.cohort-table td { color: var(--muted); }
+    table.cohort-table td b { color: var(--text); }
+
+    code, .mono {
+      font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+      font-size: 0.8rem;
+      background: rgba(30, 41, 59, 0.85);
+      color: #e2e8f0;
+      padding: 0.12rem 0.42rem;
+      border-radius: 5px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+    }
+
+    .slide-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 1rem;
+      margin-top: 1rem;
+      border-top: 1px solid rgba(51, 65, 85, 0.65);
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .notes-box {
+      display: none;
+      width: 100%;
+      max-width: 1220px;
+      background: rgba(22, 32, 54, 0.92);
+      border: 1px dashed var(--amber);
+      border-radius: 12px;
+      padding: 0.95rem 1.3rem;
+      font-size: 0.86rem;
+      line-height: 1.5;
+      color: #fde68a;
+    }
+    .notes-box.visible { display: block; }
+    .notes-box strong { color: var(--amber); text-transform: uppercase; font-size: 0.74rem; letter-spacing: 0.06em; }
+
+    @media print {
+      body { background: #0f172a; }
+      .topbar, .progress-track, .notes-box { display: none !important; }
+      .stage-wrap { padding: 0; display: block; }
+      .slide {
+        display: flex !important;
+        page-break-after: always;
+        min-height: 92vh;
+        box-shadow: none;
+        margin-bottom: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="brand">
+      <span class="pill pill-blue">Live Demo Deck</span>
+      <span>AI Physician Emergency Support · Google ADK + FHIR R4 + Cloud Run</span>
+    </div>
+    <div class="controls">
+      <span id="slideCounter" style="color:var(--muted);margin-right:6px;">Slide 1 / 10</span>
+      <button class="ctrl-btn" onclick="prevSlide()" title="Previous Slide (←)">← Prev</button>
+      <button class="ctrl-btn" onclick="nextSlide()" title="Next Slide (→ / Space)">Next →</button>
+      <button class="ctrl-btn active" id="notesBtn" onclick="toggleNotes()" title="Toggle Presenter Talk Track (N)">Speaker Notes (N)</button>
+      <button class="ctrl-btn" onclick="toggleFullscreen()" title="Fullscreen (F)">Fullscreen (F)</button>
+    </div>
+  </div>
+  <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+
+  <div class="stage-wrap">
+
+    <!-- SLIDE 1: TITLE -->
+    <section class="slide active" data-notes="Opening Hook (45s): Emergency physicians face fragmented multi-year charts, hidden OTC brand-vs-generic duplicate dosing, and shifting neighborhood viral surges—all under severe time pressure. Dumping a 20-page LLM summary creates cognitive overload. We built Emergency Physician Assist on Google ADK, Vertex AI Gemini 3.8 Flash, and Google Cloud Healthcare FHIR R4 to mirror how an attending physician actually reasons—step by step—with a dedicated Symptom Mapping UI running alongside.">
+      <div>
+        <div class="slide-kicker">Google ADK · Vertex AI (`gemini-3.8-flash`) · Cloud Healthcare HL7 FHIR R4 · Cloud Run</div>
+        <h1>AI Physician Emergency Support</h1>
+        <p class="lead">
+          A progressive, physician-gated clinical decision-support workspace &amp; multi-agent system that unifies
+          <b>Longitudinal FHIR Charts</b>, <b>4-Track Temporal Swimlanes</b>, <b>RxNorm / OpenFDA Drug Safety</b>,
+          <b>Hyperlocal 5-Digit ZIP Outbreak Surveillance</b>, and <b>Real-Time Symptom Mapping</b>.
+        </p>
+      </div>
+
+      <div class="grid-3" style="margin-top:1.5rem;">
+        <div class="card card-highlight-blue">
+          <span class="pill pill-blue">Progressive Workflow</span>
+          <h3 style="margin-top:0.55rem;">Zero Data-Dump Overload</h3>
+          <p>Enforces physician-led clinical sequencing: Charts → Swimlane → Drug Audit &amp; Gate → Hyperlocal ZIP Outbreaks.</p>
+        </div>
+        <div class="card card-highlight-amber">
+          <span class="pill pill-amber">Separate Symptom UI</span>
+          <h3 style="margin-top:0.55rem;">ADK Symptom Mapper Agents</h3>
+          <p>Continuously maps bedside signs across <b>Intrinsic EHR</b>, <b>Drug Adverse Effects</b>, and <b>ZIP Pathogens</b>.</p>
+        </div>
+        <div class="card card-highlight-green">
+          <span class="pill pill-green">Cloud-Native &amp; Hardened</span>
+          <h3 style="margin-top:0.55rem;">Live on Google Cloud Run</h3>
+          <p>Protected by Native IAP, least-privilege IAM, single-flight FHIR caching, and OWASP LLM01 isolation.</p>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>Cloud Run: <code>https://emergency-physician-assist-&lt;PROJECT_NUMBER&gt;.us-central1.run.app</code></span>
+        <span>Use <code>←</code> <code>→</code> keys · Press <code>N</code> for Presenter Talk Track</span>
+      </div>
+    </section>
+
+    <!-- SLIDE 2: CLINICAL PROBLEM & SOLUTION -->
+    <section class="slide" data-notes="Explain why existing EHR AI summarizers fail in the ED: (1) They dump everything at once before the physician anchors on the baseline trajectory; (2) They miss brand-vs-generic duplicate ingredients like Tylenol + Acetaminophen; (3) They lack hyperlocal neighborhood outbreak context when drugs don't explain infectious symptoms.">
+      <div class="slide-header">
+        <div class="slide-kicker">The Clinical Challenge in the Emergency Ward</div>
+        <h2>Why Progressive Gated Reasoning Beats Single-Turn Summarization</h2>
+      </div>
+
+      <div class="grid-2">
+        <div class="card card-highlight-red">
+          <span class="pill pill-red">Status Quo Pain Points</span>
+          <h3 style="margin-top:0.6rem;">Fragmented Signals &amp; Cognitive Overload</h3>
+          <ul>
+            <li><b>Scattered Longitudinal Context:</b> Outside urgent-care scripts, held hospital meds, and unreviewed send-out labs sit in separate EHR silos.</li>
+            <li><b>Hidden Brand/Generic Hazards:</b> Patients combine OTC brand <b>Tylenol</b> with leftover generic <b>Acetaminophen</b>, or take CYP3A4 inhibitors over statins.</li>
+            <li><b>Premature Diagnostic Closure:</b> Chasing infections before ruling out drug toxicity—or missing a local RSV/Flu/COVID surge in the patient's ZIP code.</li>
+          </ul>
+        </div>
+
+        <div class="card card-highlight-green">
+          <span class="pill pill-green">Our Architecture</span>
+          <h3 style="margin-top:0.6rem;">Physician-in-the-Loop 4-Stage Diagnostic Funnel</h3>
+          <ul>
+            <li><b>Stage-Gated Investigation:</b> Drug &amp; outbreak checks unlock in clinical order so attending physicians validate each hypothesis layer.</li>
+            <li><b>Deterministic + Agentic Verification:</b> Combines live <b>NIH RxNorm</b>, <b>OpenFDA SPL/FAERS</b>, and <b>CDC ZCTA5/NSSP/NWSS</b> APIs with <b>Google ADK</b> synthesis.</li>
+            <li><b>Dedicated Symptom Mapping Panel:</b> Visually separates resolved vs. unexplained symptoms at every stage with bedside Confirm / Rule-Out controls.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>AI Physician Emergency Support</span>
+        <span>2 / 10 · Clinical Motivation</span>
+      </div>
+    </section>
+
+    <!-- SLIDE 3: 4-STEP WORKFLOW + SYMPTOM UI -->
+    <section class="slide" data-notes="Walk across the 4 columns from left to right. Emphasize the Physician Validation Gate between Step 3 and Step 4: the physician explicitly validates that medications do NOT match (or leave unexplained fever/hypoxia) before unlocking Step 4's 5-digit ZIP outbreak radar.">
+      <div class="slide-header">
+        <div class="slide-kicker">Guided Clinical Investigation Flow</div>
+        <h2>4-Step Physician Workflow + Parallel Symptom Mapping UI</h2>
+      </div>
+
+      <div class="step-flow">
+        <div class="step-box">
+          <div class="step-num">Step 1 · Baseline</div>
+          <div class="step-title">Longitudinal Medical Charts</div>
+          <div class="step-desc">Triage vitals, allergies, Plotly multi-date lab curves (<code>Baseline → Peak → Latest</code>), imaging, consult notes &amp; open clinical loops.</div>
+        </div>
+        <div class="step-box green">
+          <div class="step-num" style="color:var(--emerald);">Step 2 · Temporal</div>
+          <div class="step-title">4-Track Clinical Swimlane</div>
+          <div class="step-desc">CSP-sandboxed interactive HTML/SVG timeline synchronizing Encounters, Meds, Labs/Imaging &amp; Care Gaps with causal connectors.</div>
+        </div>
+        <div class="step-box amber">
+          <div class="step-num" style="color:var(--amber);">Step 3 · Pharmacology + Gate</div>
+          <div class="step-title">Drugs, Adverse Effects &amp; Gate</div>
+          <div class="step-desc">Single-call parallel RxNorm Generic/Brand + OpenFDA audit, Duplicate Active-Ingredient hazard banner &amp; <b>Physician Validation Gate</b>.</div>
+        </div>
+        <div class="step-box red">
+          <div class="step-num" style="color:var(--rose);">Step 4 · Epidemiology</div>
+          <div class="step-title">5-Digit ZIP Outbreak Radar</div>
+          <div class="step-desc">Unlocked post-validation: queries CDC NSSP Local ED, CDC NWSS Sewershed PCR, CDC PLACES ZCTA5 &amp; Open-Meteo AQI for patient's ZIP.</div>
+        </div>
+      </div>
+
+      <div class="card card-highlight-blue">
+        <h3>✦ Dedicated Symptom Mapping UI (Side-by-Side Panel + Full-Screen Matrix Tab)</h3>
+        <p>
+          Powered by Google ADK's <code>symptom_mapping_pipeline</code> (<code>ParallelAgent</code> intake → <code>clinical_symptom_mapper_agent</code>).
+          Tracks every presenting sign across <b>Stage 1–2 (Intrinsic EHR)</b> → <b>Stage 3 (Drug AE Match / Unmatched)</b> → <b>Stage 4 (ZIP Outbreak Match)</b>,
+          with per-symptom bedside physician overrides (<code>Confirmed Match</code> / <code>Ruled Out</code>).
+        </p>
+      </div>
+
+      <div class="slide-footer">
+        <span>UI Entrypoint: <code>physician_assist_app.py</code></span>
+        <span>3 / 10 · Progressive Clinical Workflow</span>
+      </div>
+    </section>
+
+    <!-- SLIDE 4: MULTI-AGENT ARCHITECTURE -->
+    <section class="slide" data-notes="Highlight the Google ADK composition patterns used: Root LlmAgent orchestrator, SequentialAgent + ParallelAgent pipelines for both Chart Review and Symptom Mapping, and direct pooled Python tools connected to GCP Cloud Healthcare FHIR R4, RxNorm, OpenFDA, and CDC.">
+      <div class="slide-header">
+        <div class="slide-kicker">System &amp; Agent Topology</div>
+        <h2>Google ADK Multi-Agent &amp; Live Clinical Data Architecture</h2>
+      </div>
+
+      <div class="grid-3">
+        <div class="card">
+          <span class="pill pill-blue">Orchestration Layer</span>
+          <h3 style="margin-top:0.5rem;">Google ADK Agents</h3>
+          <ul>
+            <li><b><code>ehr_chart_summary_agent</code></b>: Root 5-stage conversational ED clinical assistant.</li>
+            <li><b><code>symptom_mapping_pipeline</code></b>: <code>ParallelAgent</code> (extractor + harvester) → <code>clinical_symptom_mapper_agent</code>.</li>
+            <li><b><code>chart_review_pipeline</code></b>: 5-step <code>SequentialAgent</code> + 3-branch <code>ParallelAgent</code> 1-page brief builder.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <span class="pill pill-green">EHR &amp; Drug Intelligence</span>
+          <h3 style="margin-top:0.5rem;">FHIR R4 + RxNorm + OpenFDA</h3>
+          <ul>
+            <li><b>GCP Cloud Healthcare FHIR R4</b>: Live <code>Patient/$everything</code> across 9 FHIR resource types.</li>
+            <li><b>NIH NLM RxNorm API</b>: Normalizes RxCUI, Brand (<code>BN</code>/<code>SBD</code>) vs. Generic (<code>IN</code>/<code>SCD</code>) &amp; ingredients.</li>
+            <li><b>OpenFDA Label &amp; FAERS</b>: Boxed warnings, SPL adverse reactions &amp; post-marketing counts.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <span class="pill pill-red">Hyperlocal Surveillance</span>
+          <h3 style="margin-top:0.5rem;">5-Digit ZIP Public Health Feeds</h3>
+          <ul>
+            <li><b>CDC NSSP (<code>rdmq-nq56</code>)</b>: Weekly local ED visit % &amp; trend for Flu, COVID-19 &amp; RSV.</li>
+            <li><b>CDC NWSS Sewershed</b>: Real-time wastewater PCR surges (Flu A, SARS-CoV-2, RSV, Measles, Mpox).</li>
+            <li><b>CDC PLACES ZCTA5 &amp; Open-Meteo</b>: Exact 5-digit ZIP prevalence &amp; real-time US AQI / PM2.5.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>Model: <code>gemini-3.8-flash</code> on Vertex AI Global Endpoint</span>
+        <span>4 / 10 · Multi-Agent Architecture</span>
+      </div>
+    </section>
+
+    <!-- SLIDE 5: 7-PATIENT COHORT -->
+    <section class="slide" data-notes="Point out that all 7 patients are seeded as rich longitudinal HL7 FHIR R4 bundles in GCP Cloud Healthcare (synthe_data), each representing a classic high-stakes Emergency Department diagnostic puzzle.">
+      <div class="slide-header">
+        <div class="slide-kicker">GCP Cloud Healthcare FHIR R4 Store (`synthe_data`)</div>
+        <h2>7 Seeded Emergency Ward Clinical Scenarios (`pat-001` – `pat-007`)</h2>
+      </div>
+
+      <div class="card" style="padding:0.7rem 1rem;">
+        <table class="cohort-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Patient &amp; ZIP</th>
+              <th>ED Chief Complaint</th>
+              <th>Key Longitudinal, Drug &amp; Outbreak Insight</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>pat-001</code></td>
+              <td><b>Alex Jordan Conn</b> (48M · Boston <code>02118</code>)</td>
+              <td>Dyspnea, wheezing, fever <code>100.2°F</code>, cough</td>
+              <td><b>Flagship Full-Flow Case:</b> Lisinopril cough + duplicate <b>Tylenol/Acetaminophen</b> (<code>ALT 58</code>) + Boston <code>02118</code> viral trigger</td>
+            </tr>
+            <tr>
+              <td><code>pat-002</code></td>
+              <td><b>Maria Elena Reynolds</b> (62F · Portland <code>97205</code>)</td>
+              <td>Proximal thigh weakness &amp; dark urine</td>
+              <td><b>CYP3A4 Statin Rhabdomyolysis:</b> Urgent-care Clarithromycin + brand <b>Lipitor</b> → <code>CK 4,850</code> &amp; AKI (<code>Cr 1.92</code>)</td>
+            </tr>
+            <tr>
+              <td><code>pat-003</code></td>
+              <td><b>David Raj Patel</b> (41M · SF <code>94108</code>)</td>
+              <td>Epigastric pain, melena, <code>BP 98/62</code></td>
+              <td><b>NSAID GI Bleed:</b> Self-escalated OTC brand <b>Advil</b> <code>2,400mg/d</code> after stopping Prilosec (<code>Hgb 14.6 → 8.4</code>)</td>
+            </tr>
+            <tr>
+              <td><code>pat-004</code></td>
+              <td><b>Evelyn Grace Carter</b> (70F · Austin <code>78701</code>)</td>
+              <td>45-min epistaxis, bruising, AFib <code>HR 112</code></td>
+              <td><b>Supratherapeutic Warfarin:</b> Missed INR clinic visits + OTC cranberry/garlic supplements (<code>INR 2.4 → 6.4</code>)</td>
+            </tr>
+            <tr>
+              <td><code>pat-005</code></td>
+              <td><b>Arthur Pendelton</b> (68M · Chicago <code>60611</code>)</td>
+              <td>Dyspnea on exertion &amp; <code>+7.5 lb</code> edema</td>
+              <td><b>HFrEF Barriers &amp; Care Gap:</b> Self-cut Lasix, Jardiance PA block, renal recovery unlocks held GDMT + dropped <code>7mm</code> lung nodule CT</td>
+            </tr>
+            <tr>
+              <td><code>pat-006</code></td>
+              <td><b>Elena Rostova</b> (54F · Seattle <code>98104</code>)</td>
+              <td>Severe fatigue, nausea &amp; abnormal labs</td>
+              <td><b>MTX Hepatotoxicity + Chelation:</b> Methotrexate dose bump (<code>ALT 92</code>) + simultaneous morning Iron blocking Synthroid (<code>TSH 6.8</code>)</td>
+            </tr>
+            <tr>
+              <td><code>pat-007</code></td>
+              <td><b>Marcus Vance</b> (42M · Denver <code>80203</code>)</td>
+              <td>Calf cramps, weakness &amp; <code>BP 168/102</code></td>
+              <td><b>Missed Secondary HTN:</b> ER started Chlorthalidone despite <code>K+ 3.2</code> + unreviewed send-out <code>ARR = 95</code> (Conn's Syndrome)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="slide-footer">
+        <span>9 FHIR Resource Types Seeded via <code>seed_fhir_store.py</code></span>
+        <span>5 / 10 · Emergency Ward Cohort</span>
+      </div>
+    </section>
+
+    <!-- SLIDE 6: LIVE DEMO ACT 1 & 2 (PAT-001 STEPS 1-2) -->
+    <section class="slide" data-notes="LIVE DEMO PART 1 (3 mins): Switch to the live browser tab! Show Tab 1 (Ward Roster), select pat-001 Alex Jordan Conn. On Step 1, point out PEF 54%, Eos 520, and ALT 22->58, plus the right-hand Symptom Panel showing Fever 100.2F still unmatched. Click Proceed to Step 2 and toggle Causal Connectors in the 4-Track Swimlane to show Lisinopril doubled on Oct 8.">
+      <div class="slide-header">
+        <div class="slide-kicker">Live Demo Walkthrough · Part 1 (`pat-001` Alex Jordan Conn)</div>
+        <h2>Roster → Step 1 (Longitudinal Charts) → Step 2 (4-Track Swimlane)</h2>
+      </div>
+
+      <div class="grid-2">
+        <div class="card card-highlight-blue">
+          <span class="pill pill-blue">Click 1–2 · Ward Roster &amp; Step 1 Charts</span>
+          <h3 style="margin-top:0.55rem;">Anchor on Longitudinal Trajectories</h3>
+          <ul>
+            <li>Select <b><code>pat-001</code> Alex Jordan Conn</b> (48M, Boston <code>02118</code>, high-criticality <b>Sulfonamide allergy</b>).</li>
+            <li><b>Plotly Lab Curves:</b> Spot <code>Peak Flow 88% → 54%</code>, <code>Eosinophils 280 → 520</code>, and subtle <code>ALT 22 → 58 U/L</code>.</li>
+            <li><b>Right-Hand Symptom Panel:</b> Wheezing maps to <b>Asthma (EHR)</b>, while <code>Fever 100.2°F</code> &amp; <code>ALT 58</code> await downstream audit.</li>
+          </ul>
+        </div>
+
+        <div class="card card-highlight-green">
+          <span class="pill pill-green">Click 3 · Step 2 Interactive Swimlane</span>
+          <h3 style="margin-top:0.55rem;">Correlate Cross-Track Timing</h3>
+          <ul>
+            <li>Click <b><code>Proceed to Step 2: Review 4-Track Clinical Swimlane Chart →</code></b>.</li>
+            <li>Inspect synchronized horizontal tracks (Encounters, Medications, Labs/Imaging, Open Loops).</li>
+            <li>Spot the temporal link: <b>Lisinopril doubled <code>5mg → 10mg</code> on Oct 8</b> right before dry cough onset—then click <b><code>Initiate Step 3 →</code></b>.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:0.4rem;">
+        <p><b>Presenter Tip:</b> Emphasize to the audience that Drugs (Step 3) and ZIP Outbreaks (Step 4) stayed intentionally locked until longitudinal history and temporal relationships were reviewed.</p>
+      </div>
+
+      <div class="slide-footer">
+        <span>Live Demo Track · Act 1 &amp; Act 2</span>
+        <span>6 / 10 · Live Walkthrough (Steps 1–2)</span>
+      </div>
+    </section>
+
+    <!-- SLIDE 7: LIVE DEMO ACT 3 & 4 (PAT-001 STEPS 3-4 + ADK AGENT) -->
+    <section class="slide" data-notes="LIVE DEMO PART 2 (4 mins): On Step 3, highlight the red DUPLICATE ACTIVE INGREDIENT SAFETY HAZARD banner catching brand Tylenol + leftover generic Acetaminophen! Then point out that neither Lisinopril nor Acetaminophen causes a 100.2F fever and SpO2 91% hypoxia. Click the Validation Gate button to unlock Step 4 (Boston 02118 Outbreaks), then click 'Run Live ADK Symptom Mapper Agent (Stage 4)' on Tab 3!">
+      <div class="slide-header">
+        <div class="slide-kicker">Live Demo Walkthrough · Part 2 (`pat-001` Alex Jordan Conn)</div>
+        <h2>Step 3 (Drug Audit &amp; Gate) → Step 4 (ZIP `02118` Outbreaks &amp; ADK Synthesis)</h2>
+      </div>
+
+      <div class="grid-2">
+        <div class="card card-highlight-amber">
+          <span class="pill pill-amber">Click 4–5 · Step 3 Drug Audit &amp; Validation Gate</span>
+          <h3 style="margin-top:0.55rem;">"Aha!" #1: Hidden Duplicate Ingredient</h3>
+          <ul>
+            <li><b>Red Safety Banner:</b> RxNorm catches active <b>BRAND Tylenol</b> + leftover <b>GENERIC Acetaminophen</b> → explains <code>ALT 58 U/L</code>!</li>
+            <li><b>OpenFDA SPL / FAERS:</b> Confirms <b>Lisinopril</b> bradykinin dry cough.</li>
+            <li><b>Validation Gate:</b> Drugs do <i>not</i> explain <code>Fever 100.2°F</code> &amp; acute hypoxia (<code>SpO2 91%</code>) → click <b><code>✓ Validate: Nothing Matches / Unexplained Symptoms → Check ZIP 02118 Outbreaks →</code></b>.</li>
+          </ul>
+        </div>
+
+        <div class="card card-highlight-red">
+          <span class="pill pill-red">Click 6–7 · Step 4 ZIP `02118` &amp; Live ADK Mapper</span>
+          <h3 style="margin-top:0.55rem;">"Aha!" #2: Hyperlocal Outbreak + 3-Way Split</h3>
+          <ul>
+            <li>Queries <b>strictly Boston ZIP <code>02118</code></b> across CDC NSSP ED trajectories, CDC NWSS Sewershed PCR, CDC PLACES ZCTA5 &amp; Open-Meteo AQI.</li>
+            <li>Click <b><code>✦ Run Live ADK Symptom Mapper Agent (Stage 4)</code></b> in the Symptom Matrix tab.</li>
+            <li>ADK synthesizes the 3-part etiology: <b>Asthma flare (EHR)</b> + <b>Acetaminophen/Lisinopril (Drug AE)</b> + <b>Viral Respiratory Trigger (ZIP <code>02118</code>)</b>.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>Live Demo Track · Act 3, Act 4 &amp; ADK Synthesis</span>
+        <span>7 / 10 · Live Walkthrough (Steps 3–4)</span>
+      </div>
+    </section>
+
+    <!-- SLIDE 8: FAST CONTRAST SCENARIOS -->
+    <section class="slide" data-notes="Use either of these 60-second contrast cases during Q&A or to show breadth: pat-002 proves the workflow stops cleanly at Step 3 when a drug interaction (Clarithromycin + Lipitor rhabdomyolysis) 100% explains the symptoms; pat-005 shows heart failure medication adherence barriers and renal recovery unlocking held GDMT.">
+      <div class="slide-header">
+        <div class="slide-kicker">90-Second Contrast Scenarios</div>
+        <h2>Showing Clinical Breadth: Pure Drug Toxicity vs. Complex Care Gaps</h2>
+      </div>
+
+      <div class="grid-2">
+        <div class="card card-highlight-amber">
+          <span class="pill pill-amber">Contrast A · <code>pat-002</code> Maria Elena Reynolds</span>
+          <h3 style="margin-top:0.55rem;">CYP3A4 Drug Interaction Resolved at Step 3</h3>
+          <ul>
+            <li><b>Presenting Signs:</b> Proximal muscle weakness, dark urine, <code>CK 110 → 4,850 U/L</code>, acute kidney injury (<code>Cr 1.92</code>).</li>
+            <li><b>Step 2 &amp; 3 Discovery:</b> Outside Urgent Care prescribed <b>Clarithromycin</b> without holding brand <b>Lipitor 80mg</b> → severe statin rhabdomyolysis.</li>
+            <li><b>Workflow Payoff:</b> Physician clicks <b><code>Log Confirmed Drug Adverse-Effect Match Only</code></b>—no unnecessary Step 4 infectious chase!</li>
+          </ul>
+        </div>
+
+        <div class="card card-highlight-blue">
+          <span class="pill pill-blue">Contrast B · <code>pat-005</code> Arthur Pendelton</span>
+          <h3 style="margin-top:0.55rem;">Adherence Barriers, Held GDMT &amp; Open Loops</h3>
+          <ul>
+            <li><b>Presenting Signs:</b> Decompensated HFrEF (<code>EF 30%</code>), <code>+7.5 lb</code> edema, <code>NT-proBNP 1,850</code>.</li>
+            <li><b>Longitudinal Payoff:</b> Catches self-halved <b>Lasix</b> + <code>$180</code> Prior Auth block on <b>Jardiance</b>.</li>
+            <li><b>Safety Unlock:</b> Renal recovery (<code>Cr 2.30 → 1.50</code>, <code>eGFR 48</code>) unlocks held GDMT + flags an unordered 6-month CT for a <code>7mm</code> lung nodule!</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>Bonus Conversational Mode: <code>.venv/bin/adk web</code> (<code>pat-007</code> Conn's Syndrome 1-Page Brief)</span>
+        <span>8 / 10 · Contrast Scenarios</span>
+      </div>
+    </section>
+
+    <!-- SLIDE 9: EFFICIENCY & SECURITY ARCHITECTURE -->
+    <section class="slide" data-notes="For engineering, architecture, and security stakeholders: highlight the concrete latency optimizations (6x -> 1x single-flight GCP FHIR request, 1-call parallel medication regimen audit, concurrent 4-source CDC ZIP queries) and defense-in-depth security (IAP, SSRF/path traversal regexes, PHI log redaction, CSPconnect-src 'none', OWASP LLM01).">
+      <div class="slide-header">
+        <div class="slide-kicker">Production Engineering</div>
+        <h2>Agent Efficiency &amp; Defense-in-Depth Security Architecture</h2>
+      </div>
+
+      <div class="grid-2">
+        <div class="card card-highlight-green">
+          <span class="pill pill-green">Performance &amp; Agent Efficiency</span>
+          <h3 style="margin-top:0.55rem;">Sub-Second Warm Reads &amp; Single-Call Audits</h3>
+          <ul>
+            <li><b>Single-Flight FHIR Deduplication (<code>6x → 1x</code>):</b> Per-patient in-flight locks + 90s TTL cache collapse parallel agent reads into 1 GCP Healthcare call (<code>&lt;0.1 ms</code> warm).</li>
+            <li><b>1-Call Batch Drug Audit:</b> <code>audit_patient_medications_rxnorm_openfda</code> audits full regimens in parallel threads instead of 6–8 sequential LLM turns.</li>
+            <li><b>Parallel 4-Feed ZIP Radar:</b> Concurrent ZCTA5 + NSSP ED + NWSS Wastewater + AQI cuts cold lookup latency by &gt;60%.</li>
+            <li><b>Pooled Sessions &amp; Singleton Runner:</b> Shared OAuth2 <code>AuthorizedSession</code> + singleton ADK <code>InMemoryRunner</code>.</li>
+          </ul>
+        </div>
+
+        <div class="card card-highlight-blue">
+          <span class="pill pill-violet">Security &amp; PHI Protection</span>
+          <h3 style="margin-top:0.55rem;">Cloud Run IAP + CWE / OWASP Hardening</h3>
+          <ul>
+            <li><b>Identity &amp; Least Privilege:</b> Cloud Run Native <b>IAP (<code>--iap</code>)</b> + dedicated <code>physician-assist-sa</code> (read-only FHIR + Vertex AI User only).</li>
+            <li><b>SSRF &amp; Injection Guards:</b> Strict leading-alphanumeric FHIR regex + <code>".."</code> rejection (<code>CWE-22/918</code>), Lucene sanitization &amp; WGS84/FIPS SoQL validation.</li>
+            <li><b>Zero PHI Exfiltration:</b> HTTP body redaction in logs (<code>CWE-532</code>) &amp; public HAPI fallback disabled (<code>ALLOW_PUBLIC_HAPI_FALLBACK=false</code>).</li>
+            <li><b>Sandbox &amp; Prompt Isolation:</b> Swimlane <code>CSP: connect-src 'none'</code> + <code>OWASP LLM01</code> untrusted clinical text boundaries.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>Verified across 6 Automated Functional, Live Vertex AI &amp; Security Test Suites</span>
+        <span>9 / 10 · Efficiency &amp; Security</span>
+      </div>
+    </section>
+
+    <!-- SLIDE 10: LAUNCH & CLOSING -->
+    <section class="slide" data-notes="Closing Slide: Invite stakeholders to test the live Cloud Run URL directly in their browser via Google Sign-In, or run locally / via ADK Web. Open the floor for clinical and technical Q&A!">
+      <div>
+        <div class="slide-kicker">Ready to Run · Cloud &amp; Local</div>
+        <h2>Live Access, Commands &amp; Documentation</h2>
+        <p class="lead">Everything is deployed on Google Cloud Run and reproducible from a single command.</p>
+      </div>
+
+      <div class="grid-2" style="margin-top:1rem;">
+        <div class="card card-highlight-blue">
+          <span class="pill pill-blue">Live Google Cloud Run (IAP Protected)</span>
+          <h3 style="margin-top:0.55rem;">Open Directly in Browser</h3>
+          <p style="margin-bottom:0.65rem;">Sign in with your authorized Google account:</p>
+          <p><code style="font-size:0.84rem;">https://emergency-physician-assist-&lt;PROJECT_NUMBER&gt;.us-central1.run.app</code></p>
+          <p style="margin-top:0.75rem;"><b>One-Command Redeploy:</b> <code>./deploy_cloud_run.sh</code></p>
+        </div>
+
+        <div class="card card-highlight-green">
+          <span class="pill pill-green">Local Developer &amp; CLI Modes</span>
+          <h3 style="margin-top:0.55rem;">Streamlit UI · ADK Web · Offline CLI</h3>
+          <ul>
+            <li><b>Physician Assist UI:</b> <code>.venv/bin/streamlit run physician_assist_app.py</code></li>
+            <li><b>Conversational ADK Web:</b> <code>.venv/bin/adk web</code></li>
+            <li><b>Deterministic CLI Trace:</b> <code>.venv/bin/python run_demo.py --patient pat-001 --offline</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:0.6rem;">
+        <p>
+          <b>Repository Guides:</b>
+          <code>README.md</code> (Architecture &amp; Setup) &nbsp;·&nbsp;
+          <code>CLOUD_RUN_DEPLOYMENT_GUIDE.md</code> (Cloud Run &amp; IAP Runbook) &nbsp;·&nbsp;
+          <code>DEMO_GUIDE.md</code> (Click-by-Click Presenter Script)
+        </p>
+      </div>
+
+      <div class="slide-footer">
+        <span>GitHub: <code>https://github.com/Sivaram0606/AI-PhysicianSupport</code></span>
+        <span>10 / 10 · Thank You &amp; Q&amp;A</span>
+      </div>
+    </section>
+
+    <div class="notes-box visible" id="notesBox"></div>
+  </div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll('.slide'));
+    const counter = document.getElementById('slideCounter');
+    const progressBar = document.getElementById('progressBar');
+    const notesBox = document.getElementById('notesBox');
+    const notesBtn = document.getElementById('notesBtn');
+    let idx = 0;
+    let showNotes = true;
+
+    function render() {
+      slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+      counter.textContent = `Slide ${idx + 1} / ${slides.length}`;
+      progressBar.style.width = `${((idx + 1) / slides.length) * 100}%`;
+      const note = slides[idx].getAttribute('data-notes') || '';
+      notesBox.innerHTML = `<strong>Presenter Talk Track:</strong> ${note}`;
+      notesBox.classList.toggle('visible', showNotes);
+      notesBtn.classList.toggle('active', showNotes);
+    }
+
+    function nextSlide() { if (idx < slides.length - 1) { idx++; render(); } }
+    function prevSlide() { if (idx > 0) { idx--; render(); } }
+    function toggleNotes() { showNotes = !showNotes; render(); }
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) { document.documentElement.requestFullscreen().catch(() => {}); }
+      else { document.exitFullscreen().catch(() => {}); }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); nextSlide(); }
+      else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevSlide(); }
+      else if (e.key === 'n' || e.key === 'N') { toggleNotes(); }
+      else if (e.key === 'f' || e.key === 'F') { toggleFullscreen(); }
+    });
+
+    render();
+  </script>
+</body>
+</html>

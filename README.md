@@ -66,7 +66,13 @@ graph TD
 ```text
 AI-PhysicianSupport/
 ├── README.md
+├── CLOUD_RUN_DEPLOYMENT_GUIDE.md                 # End-to-end Google Cloud Run deployment & IAP operations guide
+├── DEMO_GUIDE.md                                 # Click-by-click live demo script & presenter talk track
+├── DEMO_SLIDES.html                              # 10-slide interactive HTML presentation deck (speaker notes + PDF print)
 ├── requirements.txt
+├── Dockerfile                                    # Non-root Python 3.13 Cloud Run container (Streamlit UI + ADK Web)
+├── .dockerignore                                 # Excludes .venv, .git, and .env secrets from Cloud Build context
+├── deploy_cloud_run.sh                           # One-command Google Cloud Run deployment (least-privilege SA + IAP)
 ├── physician_assist_app.py                       # Emergency Physician Assist Web UI (Roster + 4-Step Gate + Separate Symptom Mapper UI)
 ├── run_demo.py                                   # CLI runner (live ADK + --offline deterministic trace)
 ├── outputs/                                      # Generated Interactive 4-Track HTML/SVG Swimlane Viewers
@@ -252,6 +258,19 @@ Run all commands below from the **repository root (`AI-PhysicianSupport/`)** wit
 ```
 
 > **Note**: `server.py` is a **headless Model Context Protocol (MCP) backend** listening on `http://127.0.0.1:8080/mcp` for external MCP clients (opening `http://127.0.0.1:8080/` in a browser will return `404 Not Found`). You **do not** need to run `server.py` to use `physician_assist_app.py`, `adk web`, or `run_demo.py` — all ADK agents bind pooled Python tools directly in-process by default unless `USE_EXTERNAL_MCP_SERVER=true` is set.
+
+### Option G — Deploy & Run on Google Cloud Run (`deploy_cloud_run.sh`)
+
+```bash
+./deploy_cloud_run.sh
+```
+
+- Builds the non-root `Dockerfile` via Google Cloud Build, provisions a dedicated least-privilege runtime Service Account (`physician-assist-sa`), configures `--session-affinity` for Streamlit WebSocket state + native **Identity-Aware Proxy (`--iap`)** for Google Sign-In browser access, and deploys **`emergency-physician-assist`** to `us-central1`.
+- See [`CLOUD_RUN_DEPLOYMENT_GUIDE.md`](CLOUD_RUN_DEPLOYMENT_GUIDE.md) for the complete architecture diagram, manual step-by-step IAM/IAP runbook, team onboarding commands, and troubleshooting guide.
+- You can also connect via local authenticated Cloud Run proxy anytime:
+  ```bash
+  gcloud run services proxy emergency-physician-assist --region=us-central1 --port=8080
+  ```
 
 ---
 
