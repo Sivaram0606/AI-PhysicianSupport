@@ -58,10 +58,13 @@ _SAFE_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
 
 
 def _compute_age_sex(birth_date: str, gender: str) -> str:
+    from datetime import date as _date
+
     sex_label = (gender or "Unknown").capitalize()
     try:
+        today = _date.today()
         dob = datetime.strptime(birth_date[:10], "%Y-%m-%d")
-        age = max(0, 2026 - dob.year - ((11, 13) < (dob.month, dob.day)))
+        age = max(0, today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day)))
         return f"{age}yo {sex_label}"
     except Exception:
         return sex_label

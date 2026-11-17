@@ -225,7 +225,11 @@ def _parse_fhir_bundle(
                     ma_note = ext.get("valueString", "")
             todays_triage_visit = {
                 "encounter_id": rid,
-                "visit_date": str(res.get("period", {}).get("start", ""))[:10],
+                "visit_date": (
+                    __import__("datetime").date.today().isoformat()
+                    if res.get("status") == "in-progress"
+                    else str(res.get("period", {}).get("start", ""))[:10]
+                ),
                 "appointment_type": (res.get("type") or [{}])[0].get("text", "Emergency Ward Triage"),
                 "chief_complaint": (res.get("reasonCode") or [{}])[0].get("text", ""),
                 "triage_vitals": vitals_dict,

@@ -63,7 +63,7 @@ _PUBLIC_HTTP.mount("https://", HTTPAdapter(pool_connections=8, pool_maxsize=16))
 def _get_fhir_store_base_url() -> str | None:
     """Validates GCP Healthcare config identifiers and returns the base `/fhir` URL."""
     project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
-    location = os.getenv("FHIR_DATASET_LOCATION", "asia-east1").strip()
+    location = os.getenv("FHIR_DATASET_LOCATION", "us-central1").strip()
     dataset_id = os.getenv("FHIR_DATASET_ID", "test").strip()
     fhir_store_id = os.getenv("FHIR_STORE_ID", "synthe_data").strip()
 

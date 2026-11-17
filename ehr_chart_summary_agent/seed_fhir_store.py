@@ -151,8 +151,8 @@ def seed_all(
 
 
 def main() -> None:
-    default_project = os.getenv("GOOGLE_CLOUD_PROJECT", "gsd-argolis-playground").strip()
-    default_location = os.getenv("FHIR_DATASET_LOCATION", "asia-east1").strip()
+    default_project = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+    default_location = os.getenv("FHIR_DATASET_LOCATION", "us-central1").strip()
     default_dataset = os.getenv("FHIR_DATASET_ID", "test").strip()
     default_fhir_store = os.getenv("FHIR_STORE_ID", "synthe_data").strip()
 

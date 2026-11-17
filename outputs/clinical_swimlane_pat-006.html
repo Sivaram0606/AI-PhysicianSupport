@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>FHIR Multi-Track Clinical Swimlane Graph — pat-006</title>
   <style>
     :root {
@@ -97,7 +98,7 @@
       border: 1px solid var(--border);
       border-radius: 12px;
     }
-    .swimlane-grid { position: relative; display: grid; min-width: 1120px; }
+    .swimlane-grid { position: relative; display: grid; width: 100%; }
     .svg-overlay {
       position: absolute;
       top: 0; left: 0;
@@ -111,21 +112,21 @@
       position: sticky; left: 0; z-index: 10;
       background: #0f172a;
       border-right: 2px solid var(--border);
-      padding: 16px 14px;
+      padding: 10px 12px;
       display: flex; flex-direction: column; justify-content: center;
     }
-    .track-title { font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; }
-    .track-sub { font-size: 0.74rem; color: var(--muted); margin-top: 4px; }
+    .track-title { font-weight: 700; font-size: 0.82rem; display: flex; align-items: center; gap: 8px; }
+    .track-sub { font-size: 0.72rem; color: var(--muted); margin-top: 3px; }
     .time-col-header {
-      padding: 14px 12px;
+      padding: 10px 10px;
       background: #0f172a;
       border-right: 1px dashed var(--border);
       text-align: center;
     }
-    .date-str { font-weight: 700; font-size: 0.84rem; color: #e2e8f0; }
-    .phase-str { font-size: 0.73rem; color: #38bdf8; margin-top: 2px; text-transform: uppercase; }
+    .date-str { font-weight: 700; font-size: 0.82rem; color: #e2e8f0; }
+    .phase-str { font-size: 0.71rem; color: #38bdf8; margin-top: 2px; text-transform: uppercase; }
     .node-cell {
-      padding: 14px 10px;
+      padding: 8px 8px;
       border-right: 1px dashed rgba(51, 65, 85, 0.65);
       display: flex; align-items: stretch; position: relative;
     }
@@ -333,8 +334,8 @@
         },
         {
           "time_id": "T3",
-          "date": "2026-11-12",
-          "display_date": "Nov 12, 2026 (ED Today)",
+          "date": "2026-11-17",
+          "display_date": "Nov 17, 2026 (ED Today)",
           "phase": "ED Acute Dyspnea",
           "tracks": {
             "track_1_encounters": {
@@ -438,8 +439,8 @@
         },
         {
           "time_id": "T2",
-          "date": "2026-11-02",
-          "display_date": "Nov 02, 2026",
+          "date": "2026-11-07",
+          "display_date": "Nov 07, 2026",
           "phase": "Outside Urgent Care",
           "tracks": {
             "track_1_encounters": {
@@ -478,8 +479,8 @@
         },
         {
           "time_id": "T3",
-          "date": "2026-11-12",
-          "display_date": "Nov 12, 2026 (ED Today)",
+          "date": "2026-11-17",
+          "display_date": "Nov 17, 2026 (ED Today)",
           "phase": "ED Rhabdomyolysis",
           "tracks": {
             "track_1_encounters": {
@@ -618,8 +619,8 @@
         },
         {
           "time_id": "T3",
-          "date": "2026-11-12",
-          "display_date": "Nov 12, 2026 (ED Today)",
+          "date": "2026-11-17",
+          "display_date": "Nov 17, 2026 (ED Today)",
           "phase": "ED Acute UGIB",
           "tracks": {
             "track_1_encounters": {
@@ -758,8 +759,8 @@
         },
         {
           "time_id": "T3",
-          "date": "2026-11-12",
-          "display_date": "Nov 12, 2026 (ED Today)",
+          "date": "2026-11-17",
+          "display_date": "Nov 17, 2026 (ED Today)",
           "phase": "ED Epistaxis",
           "tracks": {
             "track_1_encounters": {
@@ -938,8 +939,8 @@
         },
         {
           "time_id": "T4",
-          "date": "2026-11-12",
-          "display_date": "Nov 12, 2026 (Today)",
+          "date": "2026-11-17",
+          "display_date": "Nov 17, 2026 (Today)",
           "phase": "Triage & Action Plan",
           "tracks": {
             "track_1_encounters": {
@@ -1123,8 +1124,8 @@
         },
         {
           "time_id": "T4",
-          "date": "2026-11-12",
-          "display_date": "Nov 12, 2026 (Today)",
+          "date": "2026-11-17",
+          "display_date": "Nov 17, 2026 (Today)",
           "phase": "Toxicity & Malabsorption",
           "tracks": {
             "track_1_encounters": {
@@ -1268,8 +1269,8 @@
         },
         {
           "time_id": "T3",
-          "date": "2026-11-08",
-          "display_date": "Nov 08, 2026",
+          "date": "2026-11-13",
+          "display_date": "Nov 13, 2026",
           "phase": "ED Hypertensive Urgency",
           "tracks": {
             "track_1_encounters": {
@@ -1308,8 +1309,8 @@
         },
         {
           "time_id": "T4",
-          "date": "2026-11-12",
-          "display_date": "Nov 12, 2026 (Today)",
+          "date": "2026-11-17",
+          "display_date": "Nov 17, 2026 (Today)",
           "phase": "Today's Triage Alert",
           "tracks": {
             "track_1_encounters": {
@@ -1400,7 +1401,7 @@
       document.getElementById("patientBannerHeadline").textContent = pdata.headline;
 
       const tps = pdata.timepoints;
-      const colTemplate = "230px repeat(" + tps.length + ", minmax(195px, 1fr))";
+      const colTemplate = "minmax(145px, 180px) repeat(" + tps.length + ", minmax(0, 1fr))";
       const content = document.getElementById("gridContent");
       content.innerHTML = "";
 
@@ -1434,7 +1435,14 @@
         row.appendChild(labelCell);
 
         tps.forEach(tp => {
-          const node = tp.tracks[track.track_id];
+          const node = (tp.tracks && tp.tracks[track.track_id]) || {
+            node_id: "na",
+            badge: "N/A",
+            title: "No Event Recorded",
+            summary: "",
+            details: "",
+            severity: "info"
+          };
           const cell = document.createElement("div");
           cell.className = "node-cell";
 

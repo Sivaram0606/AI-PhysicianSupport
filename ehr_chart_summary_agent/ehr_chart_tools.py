@@ -106,16 +106,59 @@ def _fetch_fhir_everything_bundle(patient_identifier: str) -> tuple[str, dict[st
                 bundle = FALLBACK_BUNDLES[pid]
                 data_source = "Synthea FHIR R4 Emergency Ward Clinical Store (synthe_data fallback)"
 
+        if bundle and "entry" in bundle:
+            bundle = _shift_recent_bundle_dates(bundle)
+
         with _FHIR_BUNDLE_LOCK:
             _FHIR_BUNDLE_CACHE[pid] = (time.monotonic(), bundle, data_source)
 
         return pid, bundle, data_source
 
 
+def _shift_recent_bundle_dates(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Shifts recent acute-window dates (within 14 days of the in-progress triage seed date) to align with today."""
+    from datetime import date as _date, timedelta as _timedelta
+    import json as _json
+
+    today = _date.today()
+    seed_dt: _date | None = None
+    for entry in bundle.get("entry", []):
+        res = entry.get("resource", {})
+        if res.get("resourceType") == "Encounter" and res.get("status") == "in-progress":
+            raw_start = str(res.get("period", {}).get("start", ""))[:10]
+            try:
+                seed_dt = _date.fromisoformat(raw_start)
+                break
+            except ValueError:
+                pass
+
+    if not seed_dt or seed_dt == today:
+        return bundle
+
+    delta = today - seed_dt
+    iso_map: dict[str, str] = {}
+    disp_map: dict[str, str] = {}
+    for offset in range(0, 15):
+        old_d = seed_dt - _timedelta(days=offset)
+        new_d = old_d + delta
+        iso_map[old_d.isoformat()] = new_d.isoformat()
+        disp_map[old_d.strftime("%b %d, %Y")] = new_d.strftime("%b %d, %Y")
+
+    raw_json = _json.dumps(bundle)
+    for old_iso, new_iso in iso_map.items():
+        raw_json = raw_json.replace(old_iso, new_iso)
+    for old_disp, new_disp in disp_map.items():
+        raw_json = raw_json.replace(old_disp, new_disp)
+    return _json.loads(raw_json)
+
+
 def _compute_age(birth_date: str) -> int | None:
+    from datetime import date as _date
+
     try:
+        today = _date.today()
         dob = datetime.strptime(birth_date[:10], "%Y-%m-%d")
-        return max(0, 2026 - dob.year - ((11, 13) < (dob.month, dob.day)))
+        return max(0, today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day)))
     except Exception:
         return None
 
@@ -451,17 +494,6 @@ def get_longitudinal_labs_and_imaging(patient_id: str) -> dict[str, Any]:
     imaging_reports: list[dict[str, Any]] = []
     citations: list[dict[str, str]] = []
 
-    from datetime import date as _date
-
-    today_iso = _date.today().isoformat()
-    triage_seed_dates: set[str] = {"2026-11-12"}
-    for entry in bundle.get("entry", []):
-        res = entry.get("resource", {})
-        if res.get("resourceType") == "Encounter" and res.get("status") == "in-progress":
-            sd = str(res.get("period", {}).get("start", ""))[:10]
-            if sd:
-                triage_seed_dates.add(sd)
-
     for entry in bundle.get("entry", []):
         res = entry.get("resource", {})
         rtype = res.get("resourceType")
@@ -478,8 +510,6 @@ def get_longitudinal_labs_and_imaging(patient_id: str) -> dict[str, Any]:
             flag = (res.get("interpretation") or [{}])[0].get("text", "N")
             context = (res.get("note") or [{}])[0].get("text", "")
             dt = str(res.get("effectiveDateTime", ""))[:10]
-            if dt in triage_seed_dates:
-                dt = today_iso
             val = (
                 res["valueQuantity"].get("value")
                 if "valueQuantity" in res
@@ -506,13 +536,10 @@ def get_longitudinal_labs_and_imaging(patient_id: str) -> dict[str, Any]:
             citations.append({"source_name": data_source, "fhir_resource": f"Observation/{rid}"})
 
         elif rtype == "DiagnosticReport":
-            img_dt = str(res.get("effectiveDateTime", ""))[:10]
-            if img_dt in triage_seed_dates:
-                img_dt = today_iso
             imaging_reports.append(
                 {
                     "diagnostic_report_id": rid,
-                    "date": img_dt,
+                    "date": str(res.get("effectiveDateTime", ""))[:10],
                     "modality": res.get("code", {}).get("text", "Diagnostic Study"),
                     "findings": res.get("conclusion", ""),
                     "fhir_resource": f"DiagnosticReport/{rid}",

@@ -15,12 +15,20 @@ Combines:
 from __future__ import annotations
 
 import base64
-from datetime import date
+from datetime import date, timedelta
 import json
 from typing import Any
 
 _TODAY_ISO = date.today().isoformat()
 _TODAY_DISPLAY = date.today().strftime("%b %d, %Y")
+
+
+def _days_ago_iso(days: int) -> str:
+    return (date.today() - timedelta(days=days)).isoformat()
+
+
+def _days_ago_disp(days: int) -> str:
+    return (date.today() - timedelta(days=days)).strftime("%b %d, %Y")
 
 # Maps legacy MedicalChartAgent IDs to canonical FHIR Patient IDs
 PATIENT_ID_ALIASES: dict[str, str] = {
@@ -206,7 +214,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "rxcui": "202433",
                 "coding_display": "Tylenol",
                 "text": "Tylenol 500 MG Oral Tablet",
-                "authored_on": "2026-11-09T09:15:00+00:00",
+                "authored_on": f"{_days_ago_iso(3)}T09:15:00+00:00",
                 "dosage": "1000 mg (2 tablets) PO every 6 hours PRN fever/cough",
                 "prior_dose": "None",
                 "change_type": "RECENT OTC/PRN USE x3 days",
@@ -427,7 +435,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "id": "enc-pat002-uc",
                 "doc_id": "doc-pat002-uc",
                 "class_code": "AMB",
-                "date": "2026-11-02",
+                "date": _days_ago_iso(10),
                 "type": "Walk-In Urgent Care Visit",
                 "facility": "Portland Metro Urgent Care",
                 "author": "Dr. Alan Cho, MD",
@@ -495,7 +503,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "rxcui": "197517",
                 "coding_display": "Clarithromycin 500 MG Oral Tablet",
                 "text": "Clarithromycin 500 MG Oral Tablet",
-                "authored_on": "2026-11-05T16:30:00+00:00",
+                "authored_on": f"{_days_ago_iso(7)}T16:30:00+00:00",
                 "dosage": "500 mg PO BID for 7 days (outside Urgent Care Rx)",
                 "prior_dose": "None",
                 "change_type": "OUTSIDE URGENT CARE RX (POTENT CYP3A4 INHIBITOR)",
@@ -563,8 +571,8 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 },
                 {
                     "time_id": "T2",
-                    "date": "2026-11-02",
-                    "display_date": "Nov 02, 2026",
+                    "date": _days_ago_iso(10),
+                    "display_date": _days_ago_disp(10),
                     "phase": "Outside Urgent Care",
                     "tracks": {
                         "track_1_encounters": {"node_id": "B2_1", "title": "Urgent Care Sinusitis Visit", "badge": "OUTSIDE UC", "severity": "warning", "summary": "Outside clinic treated acute sinusitis.", "details": "Medication list not reconciled with PCP EHR."},
@@ -1152,7 +1160,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                     {"date": "2026-05-19", "value": 1.40, "flag": "H", "context": "Outpatient Baseline"},
                     {"date": "2026-10-10", "value": 2.30, "flag": "HH (Critical)", "context": "Hospital Admission (AKI)"},
                     {"date": "2026-10-14", "value": 1.75, "flag": "H", "context": "Hospital Discharge"},
-                    {"date": "2026-11-10", "value": 1.50, "flag": "H", "context": "Pre-Visit Lab (Recovered < 1.6!)"},
+                    {"date": _days_ago_iso(2), "value": 1.50, "flag": "H", "context": "Pre-Visit Lab (Recovered < 1.6!)"},
                 ],
             },
             {
@@ -1165,7 +1173,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                     {"date": "2026-05-19", "value": 52, "flag": "L", "context": "Outpatient Baseline"},
                     {"date": "2026-10-10", "value": 29, "flag": "LL", "context": "Hospital Admission"},
                     {"date": "2026-10-14", "value": 40, "flag": "L", "context": "Hospital Discharge"},
-                    {"date": "2026-11-10", "value": 48, "flag": "L", "context": "Pre-Visit Lab (Recovered > 45!)"},
+                    {"date": _days_ago_iso(2), "value": 48, "flag": "L", "context": "Pre-Visit Lab (Recovered > 45!)"},
                 ],
             },
             {
@@ -1178,7 +1186,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                     {"date": "2026-05-19", "value": 640, "flag": "H", "context": "Outpatient Baseline"},
                     {"date": "2026-10-10", "value": 4420, "flag": "HH", "context": "Hospital Admission"},
                     {"date": "2026-10-14", "value": 920, "flag": "H", "context": "Hospital Discharge"},
-                    {"date": "2026-11-10", "value": 1850, "flag": "HH", "context": "Re-elevated (+7.5 lb fluid gain)"},
+                    {"date": _days_ago_iso(2), "value": 1850, "flag": "HH", "context": "Re-elevated (+7.5 lb fluid gain)"},
                 ],
             },
             {
@@ -1190,7 +1198,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "history": [
                     {"date": "2026-05-19", "value": 4.4, "flag": "N", "context": "Baseline"},
                     {"date": "2026-10-10", "value": 5.3, "flag": "H", "context": "Hospital Admission"},
-                    {"date": "2026-11-10", "value": 4.2, "flag": "N", "context": "Recent Lab"},
+                    {"date": _days_ago_iso(2), "value": 4.2, "flag": "N", "context": "Recent Lab"},
                 ],
             },
             {
@@ -1201,7 +1209,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "ref_range": "< 5.7",
                 "history": [
                     {"date": "2026-05-19", "value": 7.1, "flag": "H", "context": "Outpatient"},
-                    {"date": "2026-11-10", "value": 7.9, "flag": "H", "context": "Worsened while Metformin held & Jardiance blocked"},
+                    {"date": _days_ago_iso(2), "value": 7.9, "flag": "H", "context": "Worsened while Metformin held & Jardiance blocked"},
                 ],
             },
         ],
@@ -1463,7 +1471,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "history": [
                     {"date": "2026-04-10", "value": 19, "flag": "N", "context": "Baseline on MTX 15mg"},
                     {"date": "2026-09-18", "value": 24, "flag": "N", "context": "ED Visit"},
-                    {"date": "2026-11-08", "value": 92, "flag": "HH (>2.5x ULN)", "context": "After MTX increase to 20mg/wk"},
+                    {"date": _days_ago_iso(4), "value": 92, "flag": "HH (>2.5x ULN)", "context": "After MTX increase to 20mg/wk"},
                 ],
             },
             {
@@ -1475,7 +1483,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "history": [
                     {"date": "2026-04-10", "value": 22, "flag": "N", "context": "Baseline on MTX 15mg"},
                     {"date": "2026-09-18", "value": 25, "flag": "N", "context": "ED Visit"},
-                    {"date": "2026-11-08", "value": 78, "flag": "HH (>2x ULN)", "context": "After MTX increase to 20mg/wk"},
+                    {"date": _days_ago_iso(4), "value": 78, "flag": "HH (>2x ULN)", "context": "After MTX increase to 20mg/wk"},
                 ],
             },
             {
@@ -1486,7 +1494,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "ref_range": "0.45 - 4.50",
                 "history": [
                     {"date": "2026-04-10", "value": 2.4, "flag": "N", "context": "Euthyroid Baseline"},
-                    {"date": "2026-11-08", "value": 6.8, "flag": "H", "context": "Elevated due to Iron + Synthroid co-administration"},
+                    {"date": _days_ago_iso(4), "value": 6.8, "flag": "H", "context": "Elevated due to Iron + Synthroid co-administration"},
                 ],
             },
             {
@@ -1498,7 +1506,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "history": [
                     {"date": "2026-04-10", "value": 12.4, "flag": "N", "context": "Outpatient"},
                     {"date": "2026-09-18", "value": 9.8, "flag": "L", "context": "ED Gastritis"},
-                    {"date": "2026-11-08", "value": 10.9, "flag": "L", "context": "Improving on Iron + Protonix"},
+                    {"date": _days_ago_iso(4), "value": 10.9, "flag": "L", "context": "Improving on Iron + Protonix"},
                 ],
             },
             {
@@ -1628,7 +1636,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "id": "enc-pat007-ed",
                 "doc_id": "doc-pat007-ed",
                 "class_code": "EMER",
-                "date": "2026-11-08",
+                "date": _days_ago_iso(4),
                 "type": "Emergency Department Visit Note",
                 "facility": "Mercy General Hospital ED",
                 "author": "Dr. Hannah Kim, MD (Emergency Medicine)",
@@ -1658,7 +1666,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "rxcui": "309114",
                 "coding_display": "Chlorthalidone 25 MG Oral Tablet",
                 "text": "Chlorthalidone 25 MG Oral Tablet",
-                "authored_on": "2026-11-08T18:00:00+00:00",
+                "authored_on": f"{_days_ago_iso(4)}T18:00:00+00:00",
                 "dosage": "25 mg PO once daily",
                 "prior_dose": "None",
                 "change_type": "UNSAFE NEW START at ED discharge despite K+ 3.2 mEq/L!",
@@ -1671,10 +1679,10 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "rxcui": "58927",
                 "coding_display": "Norvasc",
                 "text": "Norvasc 10 MG Oral Tablet",
-                "authored_on": "2026-11-08T18:05:00+00:00",
+                "authored_on": f"{_days_ago_iso(4)}T18:05:00+00:00",
                 "dosage": "10 mg PO once daily",
                 "prior_dose": "5 mg PO once daily",
-                "change_type": "DOSE INCREASED at ED discharge (2026-11-08)",
+                "change_type": f"DOSE INCREASED at ED discharge ({_days_ago_iso(4)})",
                 "adherence": "Adherent.",
                 "prescriber": "Dr. Hannah Kim, MD",
             },
@@ -1702,7 +1710,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "history": [
                     {"date": "2025-11-10", "value": 3.4, "flag": "L", "context": "Outpatient (off diuretics)"},
                     {"date": "2026-08-14", "value": 3.5, "flag": "N (Borderline)", "context": "Secondary HTN Workup"},
-                    {"date": "2026-11-08", "value": 3.2, "flag": "LL", "context": "ED Visit BEFORE Chlorthalidone start!"},
+                    {"date": _days_ago_iso(4), "value": 3.2, "flag": "LL", "context": "ED Visit BEFORE Chlorthalidone start!"},
                 ],
             },
             {
@@ -1739,7 +1747,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
         "imaging": [
             {
                 "id": "img-pat007-cthead",
-                "date": "2026-11-08",
+                "date": _days_ago_iso(4),
                 "category": "RAD",
                 "modality": "CT Head without Contrast",
                 "findings": "No acute intracranial hemorrhage, mass effect, or territorial infarction.",
@@ -1779,8 +1787,8 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 },
                 {
                     "time_id": "T3",
-                    "date": "2026-11-08",
-                    "display_date": "Nov 08, 2026",
+                    "date": _days_ago_iso(4),
+                    "display_date": _days_ago_disp(4),
                     "phase": "ED Hypertensive Urgency",
                     "tracks": {
                         "track_1_encounters": {"node_id": "V3_1", "title": "ED Visit: BP 210/118", "badge": "ED URGENCY", "severity": "critical", "summary": "Severe occipital headache -> 164/96.", "details": "Given single KCl dose."},
