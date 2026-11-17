@@ -485,6 +485,19 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "reinitiation_criteria": "Completed.",
                 "prescriber": "Dr. Sarah Jenkins, MD",
             },
+            {
+                "id": "med-or-recent-clarithromycin",
+                "status": "completed",
+                "rxcui": "197517",
+                "coding_display": "Clarithromycin 500 MG Oral Tablet",
+                "text": "Clarithromycin 500 MG Oral Tablet",
+                "authored_on": "2026-11-05T16:30:00+00:00",
+                "dosage": "500 mg PO BID for 7 days (outside Urgent Care Rx)",
+                "prior_dose": "None",
+                "change_type": "OUTSIDE URGENT CARE RX (POTENT CYP3A4 INHIBITOR)",
+                "adherence": "Completed 7-day course while continuing Lipitor 20mg; triggered statin rhabdomyolysis.",
+                "prescriber": "Urgent Care Provider (Outside Facility)",
+            },
         ],
         "labs": [
             {

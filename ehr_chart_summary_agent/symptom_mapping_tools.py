@@ -138,7 +138,7 @@ _SYMPTOM_ONTOLOGY: list[dict[str, Any]] = [
         "label": "Dizziness / Orthostasis / Lightheadedness",
         "triggers": ["dizziness", "dizzy", "orthostasis", "orthostatic", "lightheaded"],
         "ehr_keywords": ["anemia", "gi bleed", "hemorrhage", "dehydration", "hypotension", "atrial fibrillation"],
-        "drug_ae_keywords": ["dizziness", "hypotension", "haemorrhage", "bleeding", "advil", "ibuprofen", "antihypertensive"],
+        "drug_ae_keywords": ["dizziness", "hypotension", "haemorrhage", "bleeding", "advil", "ibuprofen", "antihypertensive", "rhabdomyolysis", "clarithromycin", "lipitor", "atorvastatin"],
         "outbreak_keywords": [],
         "infectious_candidate": False,
     },

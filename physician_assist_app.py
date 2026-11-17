@@ -70,6 +70,8 @@ if "selected_patient_id" not in st.session_state:
     st.session_state.selected_patient_id = "pat-001"
 if "patient_workflow_state" not in st.session_state:
     st.session_state.patient_workflow_state = {}
+if "active_view" not in st.session_state:
+    st.session_state.active_view = "roster"
 
 
 def toggle_theme() -> None:
@@ -87,9 +89,11 @@ def get_pstate(patient_id: str) -> dict[str, Any]:
             "unlocked_stage": 1,
             "active_stage": 1,
             "drug_gate_validated_no_match": False,
+            "drug_gate_confirmed_match": False,
+            "drug_gate_confirmed_timestamp": "",
             "drug_gate_note": "",
             "drug_gate_timestamp": "",
-            "drug_decisions": {},       # med_name -> "Undecided" | "Rule Out (No Match)" | "Matches Symptoms"
+            "drug_decisions": {},       # med_name -> "Undecided" | "Ruled Out (No Match)" | "Matches Symptoms"
             "symptom_overrides": {},    # symptom_id -> "Auto (Agent)" | "Confirmed Match" | "Ruled Out (No Match)"
             "adk_ai_mapping_md": "",
             "adk_ai_stage": 0,
@@ -97,9 +101,23 @@ def get_pstate(patient_id: str) -> dict[str, Any]:
     return store[patient_id]
 
 
+def reset_pstate(patient_id: str) -> None:
+    """Resets a patient's workflow progression, validation gate, and overrides back to Step 1."""
+    st.session_state.patient_workflow_state.pop(patient_id, None)
+    for key in list(st.session_state.keys()):
+        if isinstance(key, str) and (
+            key.startswith(f"drug_dec_{patient_id}_")
+            or key.startswith(f"sym_ov_{patient_id}_")
+            or key == f"gate_note_input_{patient_id}"
+        ):
+            st.session_state.pop(key, None)
+    get_pstate(patient_id)
+
+
 def select_patient(patient_id: str) -> None:
     st.session_state.selected_patient_id = patient_id
     st.session_state.header_patient_select = patient_id
+    st.session_state.active_view = "workspace"
     get_pstate(patient_id)
 
 
@@ -530,13 +548,13 @@ def metric_card(label: str, value: str, delta: str | None = None, delta_type: st
     cls = f"delta-{delta_type}"
     delta_html = f'<div class="metric-delta {cls}">{esc(delta)}</div>' if delta else ""
     st.markdown(
-        f"""
-        <div class="metric-card">
-            <div class="metric-label">{esc(label)}</div>
-            <div class="metric-value">{esc(value)}</div>
-            {delta_html}
-        </div>
-        """,
+        (
+            '<div class="metric-card">'
+            f'<div class="metric-label">{esc(label)}</div>'
+            f'<div class="metric-value">{esc(value)}</div>'
+            f'{delta_html}'
+            '</div>'
+        ),
         unsafe_allow_html=True,
     )
 
@@ -747,10 +765,22 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
         ):
             st.markdown(pstate["adk_ai_mapping_md"])
 
+    if compact_side_panel and mapped_list:
+        unmatched_only = st.toggle(
+            "Show Unmatched / Overridden Only",
+            value=False,
+            key=f"sym_filter_unmatched_{active_pid}_{btn_suffix}",
+        )
+    else:
+        unmatched_only = False
+
     # Per-symptom mapping cards
     for idx, sym in enumerate(mapped_list):
         sid = sym["symptom_id"]
         override_val = pstate["symptom_overrides"].get(sid, "Auto (Agent)")
+        is_unmatched = sym["primary_status"] == "UNMATCHED" and override_val == "Auto (Agent)"
+        if unmatched_only and not is_unmatched and override_val == "Auto (Agent)":
+            continue
 
         if override_val == "Ruled Out (No Match)":
             badge_html = '<span class="badge badge-red">Physician Ruled Out Drug Match</span>'
@@ -798,29 +828,65 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
                 for m in sym["outbreak_matches"]
             )
 
-        st.markdown(
-            f"""
-            <div class="epa-card" style="padding:0.95rem 1.05rem;margin-bottom:0.55rem;">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
-                    <div>
-                        <div style="font-size:0.84rem;font-weight:700;color:var(--text);">{esc(sym['label'])}</div>
-                        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">
-                            {esc(sym['category'])} · {esc(sym['observed_value'])} · <span class="badge-mono">{esc(sym['fhir_citation'])}</span>
-                        </div>
-                    </div>
-                    {badge_html}
-                </div>
-                <div style="margin-top:6px;">
-                    {ehr_html or '<div style="font-size:0.74rem;color:var(--text-muted);">No chronic EHR condition match yet.</div>'}
-                    {drug_html}
-                    {outbreak_html}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        body_html = (
+            (ehr_html or '<div style="font-size:0.74rem;color:var(--text-muted);">No chronic EHR condition match yet.</div>')
+            + drug_html
+            + outbreak_html
         )
 
-        if unlocked >= 3 or not compact_side_panel:
+        if compact_side_panel:
+            ev_counts = [f"{len(sym.get('ehr_matches', []))} EHR"]
+            if unlocked >= 3:
+                ev_counts.append(f"{len(sym.get('drug_matches', []))} Drug")
+            if unlocked >= 4:
+                ev_counts.append(f"{len(sym.get('outbreak_matches', []))} ZIP")
+            ov_tag = f" · Override: {esc(override_val)}" if override_val != "Auto (Agent)" else ""
+            st.markdown(
+                (
+                    '<div class="epa-card" style="padding:0.7rem 0.85rem;margin-bottom:0.25rem;">'
+                    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;flex-wrap:wrap;">'
+                    f'<div style="font-size:0.82rem;font-weight:700;color:var(--text);">{esc(sym["label"])}</div>'
+                    f'{badge_html}'
+                    '</div>'
+                    '<div style="font-size:0.71rem;color:var(--text-muted);margin-top:3px;">'
+                    f'{esc(sym["observed_value"])} · {" · ".join(ev_counts)}{ov_tag}'
+                    '</div>'
+                    '</div>'
+                ),
+                unsafe_allow_html=True,
+            )
+            with st.expander("Evidence & Override", expanded=is_unmatched):
+                st.markdown(body_html, unsafe_allow_html=True)
+                if unlocked >= 3:
+                    options_ov = ["Auto (Agent)", "Confirmed Match", "Ruled Out (No Match)"]
+                    new_ov = st.selectbox(
+                        f"Physician Validation — {sym['label']}",
+                        options=options_ov,
+                        index=options_ov.index(override_val),
+                        key=f"sym_ov_{active_pid}_{sid}_{idx}_{btn_suffix}",
+                    )
+                    if new_ov != override_val:
+                        pstate["symptom_overrides"][sid] = new_ov
+                        st.rerun()
+        else:
+            st.markdown(
+                (
+                    '<div class="epa-card" style="padding:0.95rem 1.05rem;margin-bottom:0.55rem;">'
+                    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">'
+                    '<div>'
+                    f'<div style="font-size:0.84rem;font-weight:700;color:var(--text);">{esc(sym["label"])}</div>'
+                    '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">'
+                    f'{esc(sym["category"])} · {esc(sym["observed_value"])} · <span class="badge-mono">{esc(sym["fhir_citation"])}</span>'
+                    '</div>'
+                    '</div>'
+                    f'{badge_html}'
+                    '</div>'
+                    f'<div style="margin-top:6px;">{body_html}</div>'
+                    '</div>'
+                ),
+                unsafe_allow_html=True,
+            )
+
             options_ov = ["Auto (Agent)", "Confirmed Match", "Ruled Out (No Match)"]
             new_ov = st.selectbox(
                 f"Physician Validation — {sym['label']}",
@@ -835,20 +901,27 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. Top-Level Workspace Tabs
+# 6. Top-Level Workspace Navigation (Supports 1-Click Auto-Switch from Roster)
 # ---------------------------------------------------------------------------
-tab_roster, tab_workspace, tab_sym_matrix = st.tabs(
-    [
-        "1 · Emergency Ward Patient Roster",
-        f"2 · Guided Clinical Investigation ({demo.get('name', active_pid)})",
-        "3 · Dedicated Symptom Mapping Matrix UI",
-    ]
+_VIEW_KEYS = ["roster", "workspace", "sym_matrix"]
+_VIEW_LABELS = {
+    "roster": "1 · Emergency Ward Patient Roster",
+    "workspace": f"2 · Guided Clinical Investigation ({demo.get('name', active_pid)})",
+    "sym_matrix": "3 · Dedicated Symptom Mapping Matrix UI",
+}
+active_view = st.radio(
+    "Workspace View",
+    options=_VIEW_KEYS,
+    format_func=lambda k: _VIEW_LABELS[k],
+    horizontal=True,
+    label_visibility="collapsed",
+    key="active_view",
 )
 
 # ===========================================================================
-# TAB 1: EMERGENCY WARD PATIENT ROSTER (SELECT PATIENT)
+# VIEW 1: EMERGENCY WARD PATIENT ROSTER (SELECT PATIENT)
 # ===========================================================================
-with tab_roster:
+if active_view == "roster":
     st.markdown(
         f"""
         <div class="epa-card">
@@ -892,6 +965,8 @@ with tab_roster:
         stage_badge = f'<span class="badge badge-blue">Step {ps["active_stage"]}/4</span>'
         if ps["drug_gate_validated_no_match"]:
             stage_badge = '<span class="badge badge-green">ZIP Unlocked</span>'
+        elif ps.get("drug_gate_confirmed_match"):
+            stage_badge = '<span class="badge badge-green">Drug Etiology Confirmed</span>'
         sel_style = "background:var(--blue-muted);" if is_sel else ""
         roster_rows += f"""
         <tr style="{sel_style}">
@@ -918,7 +993,7 @@ with tab_roster:
                         <th>Workflow Status</th>
                     </tr>
                 </thead>
-                <tbody>{roster_rows}</tbody>
+                <tbody>{roster_rows.replace("\n", "")}</tbody>
             </table>
         </div>
         """,
@@ -946,9 +1021,9 @@ with tab_roster:
                 )
 
 # ===========================================================================
-# TAB 2: SPLIT CLINICAL WORKSPACE (LEFT: 4-STAGE INVESTIGATION | RIGHT: SYMPTOM MAPPER UI)
+# VIEW 2: SPLIT CLINICAL WORKSPACE (LEFT: 4-STAGE INVESTIGATION | RIGHT: SYMPTOM MAPPER UI)
 # ===========================================================================
-with tab_workspace:
+elif active_view == "workspace":
     # Patient Identity & High-Criticality Allergy Header Strip
     allergies = demo.get("allergies", [])
     allergy_badges = " ".join(
@@ -956,28 +1031,37 @@ with tab_workspace:
         f'Allergy: {esc(a.get("substance"))} ({esc(a.get("reaction"))})</span>'
         for a in allergies
     )
-    st.markdown(
-        f"""
-        <div class="epa-card" style="padding:1rem 1.25rem;">
-            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-                <div>
-                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                        <span style="font-size:1.2rem;font-weight:700;color:var(--text);">{esc(demo.get('name'))}</span>
-                        <span class="badge-mono">{esc(active_pid)}</span>
-                        <span class="badge badge-blue">{esc(demo.get('age'))}yo {esc(demo.get('sex'))} · DOB {fmt_date(demo.get('dob'))}</span>
-                        <span class="badge-mono">ZIP {esc(postal_code)} · {esc(demo.get('city'))}, {esc(demo.get('state'))}</span>
+    if pstate.get("drug_gate_confirmed_match") and not pstate.get("drug_gate_validated_no_match"):
+        allergy_badges += ' <span class="badge badge-green">Drug Etiology Confirmed</span>'
+
+    hdr_col, rst_col = st.columns([6.5, 1.0])
+    with hdr_col:
+        st.markdown(
+            f"""
+            <div class="epa-card" style="padding:1rem 1.25rem;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+                    <div>
+                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                            <span style="font-size:1.2rem;font-weight:700;color:var(--text);">{esc(demo.get('name'))}</span>
+                            <span class="badge-mono">{esc(active_pid)}</span>
+                            <span class="badge badge-blue">{esc(demo.get('age'))}yo {esc(demo.get('sex'))} · DOB {fmt_date(demo.get('dob'))}</span>
+                            <span class="badge-mono">ZIP {esc(postal_code)} · {esc(demo.get('city'))}, {esc(demo.get('state'))}</span>
+                        </div>
+                        <div style="font-size:0.82rem;color:var(--text-muted);margin-top:6px;">
+                            <b>Today's Triage ({fmt_date(visit.get('visit_date'))}):</b> "{esc(visit.get('chief_complaint'))}"
+                            · PCP: {esc(demo.get('primary_care_physician'))}
+                        </div>
                     </div>
-                    <div style="font-size:0.82rem;color:var(--text-muted);margin-top:6px;">
-                        <b>Today's Triage ({fmt_date(visit.get('visit_date'))}):</b> "{esc(visit.get('chief_complaint'))}"
-                        · PCP: {esc(demo.get('primary_care_physician'))}
-                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">{allergy_badges}</div>
                 </div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;">{allergy_badges}</div>
             </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            """,
+            unsafe_allow_html=True,
+        )
+    with rst_col:
+        if st.button("↺ Reset Case", key=f"reset_case_{active_pid}", width="stretch", help="Reset this patient back to Step 1"):
+            reset_pstate(active_pid)
+            st.rerun()
 
     # 4-Step Progressive Clinical Stepper Navigation
     s_cols = st.columns(4)
@@ -1059,11 +1143,12 @@ with tab_workspace:
                         pass
                 if len(numeric_pts) >= 2:
                     st.markdown(
-                        f"""
-                        <div class="chart-wrap">
-                            <div class="chart-title">{esc(lab['test'])}</div>
-                            <div class="chart-subtitle">Reference Range: {esc(lab['ref_range'])} · LOINC {esc(lab.get('loinc_code'))}</div>
-                        """,
+                        (
+                            '<div class="chart-wrap" style="margin-bottom:0.35rem;">'
+                            f'<div class="chart-title">{esc(lab["test"])}</div>'
+                            f'<div class="chart-subtitle">Reference Range: {esc(lab["ref_range"])} · LOINC {esc(lab.get("loinc_code"))}</div>'
+                            '</div>'
+                        ),
                         unsafe_allow_html=True,
                     )
                     fig = go.Figure()
@@ -1087,7 +1172,6 @@ with tab_workspace:
                     )
                     fig.update_layout(**PLOT_LAYOUT, height=210, showlegend=False)
                     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-                    st.markdown("</div>", unsafe_allow_html=True)
 
             # Lab Summary HTML Table
             lab_rows = ""
@@ -1112,7 +1196,7 @@ with tab_workspace:
                 <div class="data-table-wrap">
                     <table class="data-table">
                         <thead><tr><th>Biomarker</th><th>Ref Range</th><th>Baseline &rarr; Peak &rarr; Latest Trajectory</th><th>FHIR Resource</th></tr></thead>
-                        <tbody>{lab_rows}</tbody>
+                        <tbody>{lab_rows.replace("\n", "")}</tbody>
                     </table>
                 </div>
                 """,
@@ -1203,11 +1287,11 @@ with tab_workspace:
                 unsafe_allow_html=True,
             )
 
-            # Embedded interactive HTML/SVG Swimlane viewer
+            # Embedded interactive HTML/SVG Swimlane viewer (tall enough for all 4 tracks + inspector)
             if swim_data.get("html_content"):
-                components.html(swim_data["html_content"], height=560, scrolling=True)
+                components.html(swim_data["html_content"], height=1200, scrolling=True)
 
-            # Synchronized 4-Track Temporal Matrix HTML Table
+            # Synchronized 4-Track Temporal Matrix HTML Table (collapsible printable view)
             tps = swim_data.get("synchronized_timepoints", [])
             tracks_meta = swim_data.get("tracks", [])
             if tps and tracks_meta:
@@ -1232,17 +1316,18 @@ with tab_workspace:
                         )
                     tr_rows += f"<tr><td style='font-weight:700;'>{esc(trk['label'])}<br><span style='font-size:0.72rem;font-weight:400;color:var(--text-muted);'>{esc(trk['subtitle'])}</span></td>{cells}</tr>"
 
-                st.markdown(
-                    f"""
-                    <div class="data-table-wrap" style="margin-top:0.8rem;">
-                        <table class="data-table">
-                            <thead><tr><th>Parallel Clinical Track</th>{th_cols}</tr></thead>
-                            <tbody>{tr_rows}</tbody>
-                        </table>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                with st.expander("View Printable 4-Track Matrix Table", expanded=False):
+                    st.markdown(
+                        f"""
+                        <div class="data-table-wrap" style="margin-top:0.2rem;">
+                            <table class="data-table">
+                                <thead><tr><th>Parallel Clinical Track</th>{th_cols}</tr></thead>
+                                <tbody>{tr_rows.replace("\n", "")}</tbody>
+                            </table>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
             causal_links = swim_data.get("causal_links", [])
             if causal_links:
@@ -1339,41 +1424,45 @@ with tab_workspace:
                     for k, v in (list(faers.items())[:6] if isinstance(faers, dict) else [])
                 )
 
+                faers_row_html = (
+                    '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">'
+                    '<span style="font-size:0.73rem;font-weight:600;color:var(--text-muted);">Top FAERS Reports:</span>'
+                    f'{faers_pills or "<span style=\\\"font-size:0.73rem;color:var(--text-muted);\\\">None returned</span>"}'
+                    '</div>'
+                )
                 st.markdown(
-                    f"""
-                    <div class="epa-card">
-                        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
-                            <div>
-                                <span style="font-size:0.95rem;font-weight:700;color:var(--text);">{esc(m_name)}</span>
-                                &nbsp;{cls_badge}
-                                &nbsp;<span class="badge-mono">RxCUI {esc(rx.get('rxcui') or m.get('rxcui_code') or '—')}</span>
-                                &nbsp;<span class="badge-mono">{esc(m.get('fhir_resource'))}</span>
-                            </div>
-                            <span class="badge badge-blue">{esc(m.get('change_type'))}</span>
-                        </div>
-                        <div style="font-size:0.8rem;color:var(--text);margin-top:7px;">
-                            <b>Prescribed Dose:</b> {esc(m.get('prescribed_dose'))} &nbsp;|&nbsp;
-                            <b>Adherence / Reconciliation:</b> {esc(m.get('actual_patient_adherence'))}
-                        </div>
-                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:5px;">
-                            <b>Active Ingredient(s):</b> {esc(", ".join(rx.get("original_generic_ingredients", [])) or rx.get("rxnorm_normalized_name") or "See RxNorm")}
-                            &nbsp;|&nbsp; <b>Clinical Uses (OpenFDA):</b> {esc((uses.get("indications_and_usage") or uses.get("purpose") or "Standard labeled indication")[:220])}
-                        </div>
-                        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:5px;">
-                            <b>Known Labeled Adverse Reactions:</b> {esc((side_fx.get("labeled_adverse_reactions") or side_fx.get("warnings_and_cautions") or "See OpenFDA SPL")[:260])}
-                        </div>
-                        {boxed_html}
-                        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-                            <span style="font-size:0.73rem;font-weight:600;color:var(--text-muted);">Top FAERS Reports:</span>
-                            {faers_pills or '<span style="font-size:0.73rem;color:var(--text-muted);">None returned</span>'}
-                        </div>
-                    </div>
-                    """,
+                    (
+                        '<div class="epa-card">'
+                        '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">'
+                        '<div>'
+                        f'<span style="font-size:0.95rem;font-weight:700;color:var(--text);">{esc(m_name)}</span>'
+                        f'&nbsp;{cls_badge}'
+                        f'&nbsp;<span class="badge-mono">RxCUI {esc(rx.get("rxcui") or m.get("rxcui_code") or "—")}</span>'
+                        f'&nbsp;<span class="badge-mono">{esc(m.get("fhir_resource"))}</span>'
+                        '</div>'
+                        f'<span class="badge badge-blue">{esc(m.get("change_type"))}</span>'
+                        '</div>'
+                        '<div style="font-size:0.8rem;color:var(--text);margin-top:7px;">'
+                        f'<b>Prescribed Dose:</b> {esc(m.get("prescribed_dose"))} &nbsp;|&nbsp; '
+                        f'<b>Adherence / Reconciliation:</b> {esc(m.get("actual_patient_adherence"))}'
+                        '</div>'
+                        '<div style="font-size:0.78rem;color:var(--text-muted);margin-top:5px;">'
+                        f'<b>Active Ingredient(s):</b> {esc(", ".join(rx.get("original_generic_ingredients", [])) or rx.get("rxnorm_normalized_name") or "See RxNorm")} '
+                        f'&nbsp;|&nbsp; <b>Clinical Uses (OpenFDA):</b> {esc((uses.get("indications_and_usage") or uses.get("purpose") or "Standard labeled indication")[:220])}'
+                        '</div>'
+                        '<div style="font-size:0.78rem;color:var(--text-muted);margin-top:5px;">'
+                        f'<b>Known Labeled Adverse Reactions:</b> {esc((side_fx.get("labeled_adverse_reactions") or side_fx.get("warnings_and_cautions") or "See OpenFDA SPL")[:260])}'
+                        '</div>'
+                        f'{boxed_html}{faers_row_html}'
+                        '</div>'
+                    ),
                     unsafe_allow_html=True,
                 )
 
                 cur_dec = pstate["drug_decisions"].get(m_name, "Undecided")
-                dec_opts = ["Undecided", "Rule Out (No Match)", "Matches Symptoms"]
+                if cur_dec == "Rule Out (No Match)":
+                    cur_dec = "Ruled Out (No Match)"
+                dec_opts = ["Undecided", "Ruled Out (No Match)", "Matches Symptoms"]
                 chosen_dec = st.radio(
                     f"Physician Assessment for {m_name}",
                     options=dec_opts,
@@ -1405,7 +1494,7 @@ with tab_workspace:
                     <div class="data-table-wrap">
                         <table class="data-table">
                             <thead><tr><th>Medication</th><th>Status</th><th>Hold / Stop Reason</th><th>Restart Criteria</th><th>FHIR ID</th></tr></thead>
-                            <tbody>{held_rows}</tbody>
+                            <tbody>{held_rows.replace("\n", "")}</tbody>
                         </table>
                     </div>
                     """,
@@ -1416,11 +1505,12 @@ with tab_workspace:
             if faers_chart_rows:
                 df_faers = pd.DataFrame(faers_chart_rows).sort_values("Reports", ascending=True).tail(10)
                 st.markdown(
-                    """
-                    <div class="chart-wrap">
-                        <div class="chart-title">OpenFDA FAERS Top Reported Adverse Event Counts</div>
-                        <div class="chart-subtitle">Post-marketing adverse event frequency across active prescribed medications (OpenFDA /drug/event.json)</div>
-                    """,
+                    (
+                        '<div class="chart-wrap" style="margin-bottom:0.35rem;">'
+                        '<div class="chart-title">OpenFDA FAERS Top Reported Adverse Event Counts</div>'
+                        '<div class="chart-subtitle">Post-marketing adverse event frequency across active prescribed medications (OpenFDA /drug/event.json)</div>'
+                        '</div>'
+                    ),
                     unsafe_allow_html=True,
                 )
                 fig_faers = go.Figure(
@@ -1434,13 +1524,12 @@ with tab_workspace:
                 )
                 fig_faers.update_layout(**PLOT_LAYOUT, height=280)
                 st.plotly_chart(fig_faers, width="stretch", config={"displayModeBar": False})
-                st.markdown("</div>", unsafe_allow_html=True)
 
             # ---------------------------------------------------------------
             # PHYSICIAN VALIDATION GATE -> UNLOCKS STEP 4 (ZIP OUTBREAKS)
             # ---------------------------------------------------------------
             unmatched_labels = symptom_map_data.get("unmatched_by_drugs_labels", [])
-            ruled_out_drugs = [k for k, v in pstate["drug_decisions"].items() if v == "Rule Out (No Match)"]
+            ruled_out_drugs = [k for k, v in pstate["drug_decisions"].items() if v in ("Ruled Out (No Match)", "Rule Out (No Match)")]
             st.markdown(
                 f"""
                 <div class="epa-card" style="border:1.5px solid #2563eb;background:var(--blue-muted);">
@@ -1484,7 +1573,15 @@ with tab_workspace:
                     width="stretch",
                     key=f"log_drug_match_only_{active_pid}",
                 ):
-                    st.success("Logged drug/adverse-effect etiology in session state. You can still validate above anytime to check concurrent ZIP outbreaks.")
+                    pstate["drug_gate_confirmed_match"] = True
+                    pstate["drug_gate_confirmed_timestamp"] = datetime.now().strftime("%b %d, %Y %H:%M")
+                    st.rerun()
+
+            if pstate.get("drug_gate_confirmed_match"):
+                st.success(
+                    f"Confirmed drug/adverse-effect etiology logged ({pstate.get('drug_gate_confirmed_timestamp', 'session')}). "
+                    "You can still validate above anytime to check concurrent ZIP outbreaks."
+                )
 
         # -------------------------------------------------------------------
         # STEP 4: HYPERLOCAL 5-DIGIT ZIP-CODE OUTBREAK SURVEILLANCE
@@ -1547,11 +1644,12 @@ with tab_workspace:
                 path_trajs = ed_traj.get("pathogen_ed_trajectories", [])
                 if path_trajs:
                     st.markdown(
-                        f"""
-                        <div class="chart-wrap" style="margin-top:0.85rem;">
-                            <div class="chart-title">Local Emergency Department Respiratory Pathogen Visits — ZIP {esc(postal_code)} Catchment</div>
-                            <div class="chart-subtitle">CDC NSSP Local Hospital ED Surveillance (rdmq-nq56) · Week Ending {fmt_date(ed_traj.get('week_ending'))}</div>
-                        """,
+                        (
+                            '<div class="chart-wrap" style="margin-top:0.85rem;margin-bottom:0.35rem;">'
+                            f'<div class="chart-title">Local Emergency Department Respiratory Pathogen Visits — ZIP {esc(postal_code)} Catchment</div>'
+                            f'<div class="chart-subtitle">CDC NSSP Local Hospital ED Surveillance (rdmq-nq56) · Week Ending {fmt_date(ed_traj.get("week_ending"))}</div>'
+                            '</div>'
+                        ),
                         unsafe_allow_html=True,
                     )
                     bar_colors = [
@@ -1571,7 +1669,6 @@ with tab_workspace:
                     max_y = max((float(p["percent_of_local_ed_visits"] or 0) for p in path_trajs), default=1.0)
                     fig_ed.update_layout(**PLOT_LAYOUT, height=250, yaxis_range=[0, max(max_y * 1.35, 1.0)])
                     st.plotly_chart(fig_ed, width="stretch", config={"displayModeBar": False})
-                    st.markdown("</div>", unsafe_allow_html=True)
 
                 # Local Sewershed Wastewater PCR Pathogen Table
                 if ww_list:
@@ -1579,25 +1676,20 @@ with tab_workspace:
                     for w in ww_list:
                         det = w.get("detected_in_local_wastewater")
                         det_badge = '<span class="badge badge-red">DETECTED (PCR+)</span>' if det else '<span class="badge badge-green">Below LOD</span>'
-                        ww_rows += f"""
-                        <tr>
-                            <td style="font-weight:600;">{esc(w['pathogen'])}</td>
-                            <td>{det_badge}</td>
-                            <td><span class="badge-mono">{esc(w.get('viral_concentration'))} {esc(w.get('concentration_units'))}</span></td>
-                            <td>{esc(w.get('short_term_trend'))}</td>
-                            <td>{fmt_date(w.get('sample_collect_date'))}</td>
-                        </tr>
-                        """
+                        ww_rows += (
+                            f'<tr><td style="font-weight:600;">{esc(w["pathogen"])}</td>'
+                            f'<td>{det_badge}</td>'
+                            f'<td><span class="badge-mono">{esc(w.get("viral_concentration"))} {esc(w.get("concentration_units"))}</span></td>'
+                            f'<td>{esc(w.get("short_term_trend"))}</td>'
+                            f'<td>{fmt_date(w.get("sample_collect_date"))}</td></tr>'
+                        )
                     st.markdown(
-                        f"""
-                        <div style="font-size:0.92rem;font-weight:700;margin:0.5rem 0 0.4rem;">Local Sewershed Wastewater Pathogen Surveillance (CDC NWSS)</div>
-                        <div class="data-table-wrap">
-                            <table class="data-table">
-                                <thead><tr><th>Pathogen</th><th>PCR Status</th><th>Concentration</th><th>Short-Term Trend</th><th>Sample Date</th></tr></thead>
-                                <tbody>{ww_rows}</tbody>
-                            </table>
-                        </div>
-                        """,
+                        (
+                            '<div style="font-size:0.92rem;font-weight:700;margin:0.5rem 0 0.4rem;">Local Sewershed Wastewater Pathogen Surveillance (CDC NWSS)</div>'
+                            '<div class="data-table-wrap"><table class="data-table">'
+                            '<thead><tr><th>Pathogen</th><th>PCR Status</th><th>Concentration</th><th>Short-Term Trend</th><th>Sample Date</th></tr></thead>'
+                            f'<tbody>{ww_rows}</tbody></table></div>'
+                        ),
                         unsafe_allow_html=True,
                     )
 
@@ -1605,11 +1697,12 @@ with tab_workspace:
                 if places_list:
                     top_places = places_list[:8]
                     st.markdown(
-                        f"""
-                        <div class="chart-wrap">
-                            <div class="chart-title">Persistent Disease Prevalence Strictly Inside ZIP {esc(postal_code)} (CDC PLACES ZCTA5)</div>
-                            <div class="chart-subtitle">Source: data.cdc.gov/resource/qnzd-25i4.json?locationname={esc(postal_code)}</div>
-                        """,
+                        (
+                            '<div class="chart-wrap" style="margin-bottom:0.35rem;">'
+                            f'<div class="chart-title">Persistent Disease Prevalence Strictly Inside ZIP {esc(postal_code)} (CDC PLACES ZCTA5)</div>'
+                            f'<div class="chart-subtitle">Source: data.cdc.gov/resource/qnzd-25i4.json?locationname={esc(postal_code)}</div>'
+                            '</div>'
+                        ),
                         unsafe_allow_html=True,
                     )
                     fig_pl = go.Figure(
@@ -1626,7 +1719,6 @@ with tab_workspace:
                     max_prev = max((float(r["prevalence_in_zip_percent"] or 0) for r in top_places), default=10.0)
                     fig_pl.update_layout(**PLOT_LAYOUT, height=280, xaxis_range=[0, max_prev * 1.22])
                     st.plotly_chart(fig_pl, width="stretch", config={"displayModeBar": False})
-                    st.markdown("</div>", unsafe_allow_html=True)
 
     # -----------------------------------------------------------------------
     # RIGHT COLUMN: SEPARATE LIVE SYMPTOM MAPPING ASSISTANT UI
@@ -1635,9 +1727,9 @@ with tab_workspace:
         render_symptom_mapping_ui(compact_side_panel=True)
 
 # ===========================================================================
-# TAB 3: DEDICATED FULL-SCREEN SYMPTOM MAPPING MATRIX UI
+# VIEW 3: DEDICATED FULL-SCREEN SYMPTOM MAPPING MATRIX UI
 # ===========================================================================
-with tab_sym_matrix:
+elif active_view == "sym_matrix":
     st.markdown(
         f"""
         <div class="epa-card">
@@ -1696,7 +1788,7 @@ with tab_sym_matrix:
                         <th>Physician Status</th>
                     </tr>
                 </thead>
-                <tbody>{matrix_rows}</tbody>
+                <tbody>{matrix_rows.replace("\n", "")}</tbody>
             </table>
         </div>
         """,

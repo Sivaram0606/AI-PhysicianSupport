@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 _GCP_IDENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,127}$")
 _FHIR_RESOURCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
-_SAFE_DRUG_RE = re.compile(r"^[A-Za-z0-9\s.,'()\-/\[\]:]{1,160}$")
+_SAFE_DRUG_RE = re.compile(r"^[A-Za-z0-9 .,''()\-/\[\]:]{1,160}$")
 
 _HEALTHCARE_BASE_URL = "https://healthcare.googleapis.com/v1"
 _SESSION_LOCK = threading.Lock()

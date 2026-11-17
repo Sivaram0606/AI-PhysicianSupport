@@ -425,7 +425,7 @@ def generate_interactive_swimlane_html(
       border: 1px solid var(--border);
       border-radius: 12px;
     }}
-    .swimlane-grid {{ position: relative; display: grid; min-width: 1120px; }}
+    .swimlane-grid {{ position: relative; display: grid; width: 100%; }}
     .svg-overlay {{
       position: absolute;
       top: 0; left: 0;
@@ -439,21 +439,21 @@ def generate_interactive_swimlane_html(
       position: sticky; left: 0; z-index: 10;
       background: #0f172a;
       border-right: 2px solid var(--border);
-      padding: 16px 14px;
+      padding: 10px 12px;
       display: flex; flex-direction: column; justify-content: center;
     }}
-    .track-title {{ font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; }}
-    .track-sub {{ font-size: 0.74rem; color: var(--muted); margin-top: 4px; }}
+    .track-title {{ font-weight: 700; font-size: 0.82rem; display: flex; align-items: center; gap: 8px; }}
+    .track-sub {{ font-size: 0.72rem; color: var(--muted); margin-top: 3px; }}
     .time-col-header {{
-      padding: 14px 12px;
+      padding: 10px 10px;
       background: #0f172a;
       border-right: 1px dashed var(--border);
       text-align: center;
     }}
-    .date-str {{ font-weight: 700; font-size: 0.84rem; color: #e2e8f0; }}
-    .phase-str {{ font-size: 0.73rem; color: #38bdf8; margin-top: 2px; text-transform: uppercase; }}
+    .date-str {{ font-weight: 700; font-size: 0.82rem; color: #e2e8f0; }}
+    .phase-str {{ font-size: 0.71rem; color: #38bdf8; margin-top: 2px; text-transform: uppercase; }}
     .node-cell {{
-      padding: 14px 10px;
+      padding: 8px 8px;
       border-right: 1px dashed rgba(51, 65, 85, 0.65);
       display: flex; align-items: stretch; position: relative;
     }}
@@ -574,7 +574,7 @@ def generate_interactive_swimlane_html(
       document.getElementById("patientBannerHeadline").textContent = pdata.headline;
 
       const tps = pdata.timepoints;
-      const colTemplate = "230px repeat(" + tps.length + ", minmax(195px, 1fr))";
+      const colTemplate = "minmax(145px, 180px) repeat(" + tps.length + ", minmax(0, 1fr))";
       const content = document.getElementById("gridContent");
       content.innerHTML = "";
 
