@@ -119,20 +119,38 @@ def extract_swimlane_from_fhir_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
                 embedded_swimlane = None
 
     if embedded_swimlane and embedded_swimlane.get("timepoints"):
+        from datetime import date as _date
+
+        today_iso = _date.today().isoformat()
+        today_disp = _date.today().strftime("%b %d, %Y")
+        tps = []
+        for tp in embedded_swimlane["timepoints"]:
+            tp_copy = dict(tp)
+            disp = str(tp_copy.get("display_date", ""))
+            if "(ED Today)" in disp:
+                tp_copy["date"] = today_iso
+                tp_copy["display_date"] = f"{today_disp} (ED Today)"
+            elif "(Today)" in disp:
+                tp_copy["date"] = today_iso
+                tp_copy["display_date"] = f"{today_disp} (Today)"
+            tps.append(tp_copy)
         return {
             "patient_id": pid,
             "patient_name": full_name,
             "age_sex": embedded_swimlane.get("age_sex", age_sex),
             "headline": headline,
-            "timepoints": embedded_swimlane["timepoints"],
+            "timepoints": tps,
             "causal_links": embedded_swimlane.get("causal_links", []),
         }
 
     # Dynamic synthesis fallback for any arbitrary FHIR Patient/$everything bundle without extensions
+    from datetime import date as _date
+
+    today_iso = _date.today().isoformat()
     sorted_encs = sorted(encounters, key=lambda e: (e.get("period", {}).get("start") or ""))
     timepoints: list[dict[str, Any]] = []
-    for idx, enc in enumerate(sorted_encs[-4:] or [{"period": {"start": "2026-11-12"}, "type": [{"text": "Clinical Review"}]}], start=1):
-        dt = (enc.get("period", {}).get("start") or "2026-11-12")[:10]
+    for idx, enc in enumerate(sorted_encs[-4:] or [{"period": {"start": today_iso}, "type": [{"text": "Clinical Review"}]}], start=1):
+        dt = (enc.get("period", {}).get("start") or today_iso)[:10]
         enc_title = (enc.get("type") or [{}])[0].get("text", "Clinical Encounter")
         reason = (enc.get("reasonCode") or [{}])[0].get("text", "Clinical evaluation")
         is_active = enc.get("status") == "in-progress"

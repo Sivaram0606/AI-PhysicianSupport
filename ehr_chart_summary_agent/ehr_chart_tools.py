@@ -230,7 +230,11 @@ def get_patient_demographics_and_triage(patient_id: str) -> dict[str, Any]:
                     ma_note = ext.get("valueString", "")
             todays_visit = {
                 "encounter_id": rid,
-                "visit_date": str(res.get("period", {}).get("start", ""))[:10],
+                "visit_date": (
+                    __import__("datetime").date.today().isoformat()
+                    if res.get("status") == "in-progress"
+                    else str(res.get("period", {}).get("start", ""))[:10]
+                ),
                 "appointment_type": (res.get("type") or [{}])[0].get("text", "Emergency Ward Triage"),
                 "chief_complaint": (res.get("reasonCode") or [{}])[0].get("text", ""),
                 "triage_vitals_today": {

@@ -15,8 +15,12 @@ Combines:
 from __future__ import annotations
 
 import base64
+from datetime import date
 import json
 from typing import Any
+
+_TODAY_ISO = date.today().isoformat()
+_TODAY_DISPLAY = date.today().strftime("%b %d, %Y")
 
 # Maps legacy MedicalChartAgent IDs to canonical FHIR Patient IDs
 PATIENT_ID_ALIASES: dict[str, str] = {
@@ -96,7 +100,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
         "lon": -71.0765,
         "todays_triage": {
             "encounter_id": "enc-pat001-triage",
-            "visit_date": "2026-11-12",
+            "visit_date": _TODAY_ISO,
             "appointment_type": "Emergency Ward Acute Triage",
             "chief_complaint": "Acute shortness of breath, expiratory wheezing, and persistent dry cough for 3 days.",
             "vitals": {
@@ -246,7 +250,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "history": [
                     {"date": "2025-11-14", "value": 180, "flag": "N", "context": "Annual Baseline"},
                     {"date": "2026-10-08", "value": 340, "flag": "H", "context": "PCP Visit"},
-                    {"date": "2026-11-12", "value": 520, "flag": "HH", "context": "ED Triage STAT CBC (Eosinophilic Asthma Flare)"},
+                    {"date": _TODAY_ISO, "value": 520, "flag": "HH", "context": "ED Triage STAT CBC (Eosinophilic Asthma Flare)"},
                 ],
             },
             {
@@ -257,7 +261,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "ref_range": "7 - 35",
                 "history": [
                     {"date": "2026-10-08", "value": 22, "flag": "N", "context": "Baseline LFT"},
-                    {"date": "2026-11-12", "value": 58, "flag": "H", "context": "ED STAT CMP (Mild elevation after duplicate Acetaminophen/Tylenol)"},
+                    {"date": _TODAY_ISO, "value": 58, "flag": "H", "context": "ED STAT CMP (Mild elevation after duplicate Acetaminophen/Tylenol)"},
                 ],
             },
             {
@@ -268,14 +272,14 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "ref_range": "80 - 100",
                 "history": [
                     {"date": "2025-11-14", "value": 88, "flag": "N", "context": "Outpatient Asthma Baseline"},
-                    {"date": "2026-11-12", "value": 54, "flag": "LL", "context": "ED Arrival (Moderate-Severe Bronchospasm)"},
+                    {"date": _TODAY_ISO, "value": 54, "flag": "LL", "context": "ED Arrival (Moderate-Severe Bronchospasm)"},
                 ],
             },
         ],
         "imaging": [
             {
                 "id": "img-pat001-cxr",
-                "date": "2026-11-12",
+                "date": _TODAY_ISO,
                 "category": "RAD",
                 "modality": "Portable Chest X-Ray (ED)",
                 "findings": "Hyperinflated lung fields consistent with acute asthma bronchospasm; no focal lobar consolidation or pneumothorax.",
@@ -327,8 +331,8 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 },
                 {
                     "time_id": "T3",
-                    "date": "2026-11-12",
-                    "display_date": "Nov 12, 2026 (ED Today)",
+                    "date": _TODAY_ISO,
+                    "display_date": f"{_TODAY_DISPLAY} (ED Today)",
                     "phase": "ED Acute Dyspnea",
                     "tracks": {
                         "track_1_encounters": {"node_id": "A3_1", "title": "ED Triage: SpO2 91%, RR 24", "badge": "ED ACUTE", "severity": "critical", "summary": "Acute dyspnea, wheezing & 3-day fever/cough.", "details": "BP 152/94, HR 104, Temp 100.2 F in Boston ZIP 02118."},
@@ -365,7 +369,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
         "lon": -122.6844,
         "todays_triage": {
             "encounter_id": "enc-pat002-triage",
-            "visit_date": "2026-11-12",
+            "visit_date": _TODAY_ISO,
             "appointment_type": "Emergency Ward Acute Triage",
             "chief_complaint": "Proximal muscle weakness, dark tea-colored urine, dizziness, and fatigue x4 days.",
             "vitals": {
@@ -508,7 +512,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "ref_range": "30 - 190",
                 "history": [
                     {"date": "2026-03-15", "value": 110, "flag": "N", "context": "Baseline on Lipitor"},
-                    {"date": "2026-11-12", "value": 4850, "flag": "HH (Critical)", "context": "ED Arrival (Statin + Clarithromycin Rhabdomyolysis)"},
+                    {"date": _TODAY_ISO, "value": 4850, "flag": "HH (Critical)", "context": "ED Arrival (Statin + Clarithromycin Rhabdomyolysis)"},
                 ],
             },
             {
@@ -519,14 +523,14 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "ref_range": "0.6 - 1.1",
                 "history": [
                     {"date": "2026-03-15", "value": 0.85, "flag": "N", "context": "Outpatient Baseline"},
-                    {"date": "2026-11-12", "value": 1.92, "flag": "HH", "context": "ED Arrival (Acute Myoglobinuric AKI)"},
+                    {"date": _TODAY_ISO, "value": 1.92, "flag": "HH", "context": "ED Arrival (Acute Myoglobinuric AKI)"},
                 ],
             },
         ],
         "imaging": [
             {
                 "id": "img-pat002-us",
-                "date": "2026-11-12",
+                "date": _TODAY_ISO,
                 "category": "RAD",
                 "modality": "Renal Ultrasound (ED)",
                 "findings": "Increased bilateral renal cortical echogenicity without hydronephrosis, consistent with acute medical renal injury.",
@@ -571,8 +575,8 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 },
                 {
                     "time_id": "T3",
-                    "date": "2026-11-12",
-                    "display_date": "Nov 12, 2026 (ED Today)",
+                    "date": _TODAY_ISO,
+                    "display_date": f"{_TODAY_DISPLAY} (ED Today)",
                     "phase": "ED Rhabdomyolysis",
                     "tracks": {
                         "track_1_encounters": {"node_id": "B3_1", "title": "ED Triage: Dark Urine & Weakness", "badge": "ED ACUTE", "severity": "critical", "summary": "BP 112/68, HR 96; proximal weakness x4d.", "details": "Portland ZIP 97205."},
@@ -608,7 +612,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
         "lon": -122.4083,
         "todays_triage": {
             "encounter_id": "enc-pat003-triage",
-            "visit_date": "2026-11-12",
+            "visit_date": _TODAY_ISO,
             "appointment_type": "Emergency Ward Acute Triage",
             "chief_complaint": "Severe burning epigastric pain, melena (black tarry stools) x2 days, and orthostatic lightheadedness.",
             "vitals": {
@@ -708,7 +712,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "ref_range": "13.5 - 17.5",
                 "history": [
                     {"date": "2026-04-18", "value": 14.6, "flag": "N", "context": "Outpatient Baseline"},
-                    {"date": "2026-11-12", "value": 8.4, "flag": "LL (Critical)", "context": "ED Arrival (Acute NSAID Peptic Ulcer Bleed)"},
+                    {"date": _TODAY_ISO, "value": 8.4, "flag": "LL (Critical)", "context": "ED Arrival (Acute NSAID Peptic Ulcer Bleed)"},
                 ],
             },
             {
@@ -719,14 +723,14 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "ref_range": "7 - 20",
                 "history": [
                     {"date": "2026-04-18", "value": 14, "flag": "N", "context": "Outpatient Baseline"},
-                    {"date": "2026-11-12", "value": 46, "flag": "HH", "context": "ED Arrival (Elevated BUN/Cr ratio = Upper GI Bleed)"},
+                    {"date": _TODAY_ISO, "value": 46, "flag": "HH", "context": "ED Arrival (Elevated BUN/Cr ratio = Upper GI Bleed)"},
                 ],
             },
         ],
         "imaging": [
             {
                 "id": "img-pat003-upright",
-                "date": "2026-11-12",
+                "date": _TODAY_ISO,
                 "category": "RAD",
                 "modality": "Upright Chest / Abdominal Radiograph (ED)",
                 "findings": "No subdiaphragmatic free air to suggest perforation; emergent GI consult for EGD requested.",
@@ -771,8 +775,8 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 },
                 {
                     "time_id": "T3",
-                    "date": "2026-11-12",
-                    "display_date": "Nov 12, 2026 (ED Today)",
+                    "date": _TODAY_ISO,
+                    "display_date": f"{_TODAY_DISPLAY} (ED Today)",
                     "phase": "ED Acute UGIB",
                     "tracks": {
                         "track_1_encounters": {"node_id": "C3_1", "title": "ED Triage: BP 98/62, HR 114", "badge": "HEMODYNAMIC", "severity": "critical", "summary": "Melena & orthostasis in SF ZIP 94108.", "details": "2 large-bore IVs placed."},
@@ -808,7 +812,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
         "lon": -97.7437,
         "todays_triage": {
             "encounter_id": "enc-pat004-triage",
-            "visit_date": "2026-11-12",
+            "visit_date": _TODAY_ISO,
             "appointment_type": "Emergency Ward Acute Triage",
             "chief_complaint": "Spontaneous epistaxis (nosebleed) x45 minutes, forearm ecchymoses, and palpitations.",
             "vitals": {
@@ -887,7 +891,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 "history": [
                     {"date": "2026-08-12", "value": 2.3, "flag": "N", "context": "Anticoag Clinic"},
                     {"date": "2026-09-10", "value": 2.4, "flag": "N", "context": "Anticoag Clinic"},
-                    {"date": "2026-11-12", "value": 6.4, "flag": "HH (Critical)", "context": "ED STAT Coags (Active Epistaxis)"},
+                    {"date": _TODAY_ISO, "value": 6.4, "flag": "HH (Critical)", "context": "ED STAT Coags (Active Epistaxis)"},
                 ],
             }
         ],
@@ -931,8 +935,8 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 },
                 {
                     "time_id": "T3",
-                    "date": "2026-11-12",
-                    "display_date": "Nov 12, 2026 (ED Today)",
+                    "date": _TODAY_ISO,
+                    "display_date": f"{_TODAY_DISPLAY} (ED Today)",
                     "phase": "ED Epistaxis",
                     "tracks": {
                         "track_1_encounters": {"node_id": "D3_1", "title": "ED Triage: Epistaxis & AFib HR 112", "badge": "ED BLEED", "severity": "critical", "summary": "45-min nosebleed & ecchymoses (ZIP 78701).", "details": "Direct nasal compression & packing."},
@@ -969,7 +973,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
         "lon": -87.6213,
         "todays_triage": {
             "encounter_id": "enc-pat005-triage",
-            "visit_date": "2026-11-12",
+            "visit_date": _TODAY_ISO,
             "appointment_type": "Emergency Ward / Post-Hospitalization Decompensation",
             "chief_complaint": "Increasing shortness of breath on exertion and bilateral ankle swelling over the past 5 days.",
             "vitals": {
@@ -1265,8 +1269,8 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 },
                 {
                     "time_id": "T4",
-                    "date": "2026-11-12",
-                    "display_date": "Nov 12, 2026 (Today)",
+                    "date": _TODAY_ISO,
+                    "display_date": f"{_TODAY_DISPLAY} (Today)",
                     "phase": "Triage & Action Plan",
                     "tracks": {
                         "track_1_encounters": {"node_id": "N4_1", "title": "Triage: SpO2 93%, BP 148/90", "badge": "TODAY", "severity": "critical", "summary": "2+ shin edema, Wt 191.5 lbs (Chicago ZIP 60611).", "details": "Early ADHF decompensation."},
@@ -1304,7 +1308,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
         "lon": -122.3242,
         "todays_triage": {
             "encounter_id": "enc-pat006-triage",
-            "visit_date": "2026-11-12",
+            "visit_date": _TODAY_ISO,
             "appointment_type": "Emergency Ward / Acute Drug Toxicity Triage",
             "chief_complaint": "Persistent severe fatigue, nausea, RUQ discomfort, morning hand stiffness, and abnormal labs.",
             "vitals": {
@@ -1557,8 +1561,8 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 },
                 {
                     "time_id": "T4",
-                    "date": "2026-11-12",
-                    "display_date": "Nov 12, 2026 (Today)",
+                    "date": _TODAY_ISO,
+                    "display_date": f"{_TODAY_DISPLAY} (Today)",
                     "phase": "Toxicity & Malabsorption",
                     "tracks": {
                         "track_1_encounters": {"node_id": "E4_1", "title": "Triage: Nausea & Exhaustion", "badge": "TODAY", "severity": "critical", "summary": "2w nausea & severe fatigue (Seattle ZIP 98104).", "details": "Vitals stable."},
@@ -1596,7 +1600,7 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
         "lon": -104.9892,
         "todays_triage": {
             "encounter_id": "enc-pat007-triage",
-            "visit_date": "2026-11-12",
+            "visit_date": _TODAY_ISO,
             "appointment_type": "Emergency Ward / Post-ED Hypertensive & Electrolyte Alert",
             "chief_complaint": "Bilateral calf cramps, generalized muscle weakness, and elevated BP 168/102 after starting ER water pill.",
             "vitals": {
@@ -1787,8 +1791,8 @@ RAW_COHORT_SPECS: list[dict[str, Any]] = [
                 },
                 {
                     "time_id": "T4",
-                    "date": "2026-11-12",
-                    "display_date": "Nov 12, 2026 (Today)",
+                    "date": _TODAY_ISO,
+                    "display_date": f"{_TODAY_DISPLAY} (Today)",
                     "phase": "Today's Triage Alert",
                     "tracks": {
                         "track_1_encounters": {"node_id": "V4_1", "title": "Triage: Calf Cramps & BP 168/102", "badge": "TODAY", "severity": "critical", "summary": "Symptomatic muscle cramps x2d (Denver ZIP 80203).", "details": "Acute hypokalemia symptoms."},
