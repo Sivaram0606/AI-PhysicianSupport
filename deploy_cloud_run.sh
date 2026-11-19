@@ -31,32 +31,67 @@ gcloud services enable \
   iap.googleapis.com \
   --project="${PROJECT_ID}"
 
-# 2. Provision dedicated least-privilege runtime Service Account
+# 1b. Ensure Cloud Healthcare FHIR Dataset & R4 Store exist and are seeded
+if command -v python3 >/dev/null 2>&1; then
+  echo "==> Ensuring FHIR dataset '${FHIR_DATASET}' and store '${FHIR_STORE}' (${FHIR_LOCATION}) are created & seeded..."
+  python3 ehr_chart_summary_agent/seed_fhir_store.py \
+    --project="${PROJECT_ID}" \
+    --location="${FHIR_LOCATION}" \
+    --dataset="${FHIR_DATASET}" \
+    --fhir-store="${FHIR_STORE}"
+else
+  echo "WARNING: python3 not found; skipping automatic FHIR seeding."
+fi
+
+# 2. Provision dedicated least-privilege runtime Service Account (falls back to default SA if setIamPolicy is restricted)
+SA_FLAG=()
 if ! gcloud iam service-accounts describe "${SA_EMAIL}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
   echo "==> Creating least-privilege runtime service account: ${SA_EMAIL}"
   gcloud iam service-accounts create "${SA_NAME}" \
     --display-name="Emergency Physician Assist Cloud Run Runtime SA" \
-    --project="${PROJECT_ID}"
+    --project="${PROJECT_ID}" || true
 fi
 
+IAM_OK=true
 for ROLE in \
   "roles/healthcare.fhirStoreViewer" \
   "roles/healthcare.fhirResourceReader" \
   "roles/aiplatform.user" \
   "roles/logging.logWriter"; do
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  if ! gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="${ROLE}" \
     --condition=None \
-    --quiet >/dev/null
+    --quiet >/dev/null 2>&1; then
+    IAM_OK=false
+    break
+  fi
 done
+
+if [[ "${IAM_OK}" == "true" ]]; then
+  SA_FLAG=(--service-account="${SA_EMAIL}")
+else
+  echo "WARNING: Project-level IAM binding (resourcemanager.projects.setIamPolicy) is restricted; deploying Cloud Run with default Compute Engine service account."
+fi
+
+PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
+# Ensure Cloud Build's default Compute Engine SA can read uploaded source tarballs and push images when project-level IAM is restricted
+gcloud storage buckets add-iam-policy-binding "gs://run-sources-${PROJECT_ID}-${REGION}" \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/storage.objectViewer" \
+  --project="${PROJECT_ID}" >/dev/null 2>&1 || true
+gcloud artifacts repositories add-iam-policy-binding cloud-run-source-deploy \
+  --location="${REGION}" \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer" \
+  --project="${PROJECT_ID}" >/dev/null 2>&1 || true
 
 # 3. Deploy container from source to Cloud Run (with sticky sessions for Streamlit WebSockets & IAP)
 gcloud run deploy "${SERVICE_NAME}" \
   --source=. \
   --project="${PROJECT_ID}" \
   --region="${REGION}" \
-  --service-account="${SA_EMAIL}" \
+  "${SA_FLAG[@]+"${SA_FLAG[@]}"}" \
   --memory=2Gi \
   --cpu=2 \
   --concurrency=20 \

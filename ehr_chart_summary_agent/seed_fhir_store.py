@@ -9,13 +9,27 @@ from `.env` (or CLI flags `--project`, `--location`, `--dataset`, `--fhir-store`
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import subprocess
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
-import google.auth
-from dotenv import load_dotenv
-from google.auth.transport import requests as grequests
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional when running via gcloud fallback
+    load_dotenv = None
+
+try:
+    import google.auth
+    from google.auth.transport import requests as grequests
+except ImportError:  # pragma: no cover - optional when running via gcloud fallback
+    google = None
+    grequests = None
 
 try:
     from .fhir_cohort_data import get_emergency_ward_resources
@@ -24,7 +38,8 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+if load_dotenv is not None:
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
 import re
 from urllib.parse import quote
@@ -40,9 +55,109 @@ def _safe_ident(value: str, label: str) -> str:
     return quote(cleaned, safe="")
 
 
-def get_authorized_session() -> grequests.AuthorizedSession:
-    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    return grequests.AuthorizedSession(creds)
+class _StdlibResponse:
+    def __init__(self, status_code: int, body: bytes) -> None:
+        self.status_code = status_code
+        self._body = body
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    def raise_for_status(self) -> None:
+        if not self.ok:
+            raise RuntimeError(f"HTTP {self.status_code}: {self._body.decode('utf-8', errors='replace')[:300]}")
+
+
+class _GcloudTokenSession:
+    """Minimal AuthorizedSession-compatible HTTP client using gcloud ADC/CLI token + curl."""
+
+    def __init__(self) -> None:
+        token = ""
+        for cmd in (
+            ["gcloud", "auth", "application-default", "print-access-token"],
+            ["gcloud", "auth", "print-access-token"],
+        ):
+            try:
+                token = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
+                if token:
+                    break
+            except subprocess.CalledProcessError:
+                continue
+        if not token:
+            raise RuntimeError("Unable to obtain access token from gcloud.")
+        self._token = token
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+        json_body: object | None = None,
+        timeout: int = 15,
+    ) -> _StdlibResponse:
+        if params:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}{urllib.parse.urlencode(params)}"
+        cmd = [
+            "curl",
+            "-sS",
+            "--max-time",
+            str(timeout),
+            "-X",
+            method,
+            "-H",
+            f"Authorization: Bearer {self._token}",
+            "-w",
+            "\n%{http_code}",
+        ]
+        req_headers = dict(headers or {})
+        if json_body is not None:
+            req_headers.setdefault("Content-Type", "application/json")
+        for k, v in req_headers.items():
+            cmd.extend(["-H", f"{k}: {v}"])
+        input_data: bytes | None = None
+        if json_body is not None:
+            input_data = json.dumps(json_body).encode("utf-8")
+            cmd.extend(["--data-binary", "@-"])
+        cmd.append(url)
+        proc = subprocess.run(cmd, input=input_data, capture_output=True, check=True)
+        out = proc.stdout
+        body, _, code_bytes = out.rpartition(b"\n")
+        return _StdlibResponse(int(code_bytes.decode("ascii").strip()), body)
+
+    def get(self, url: str, timeout: int = 15) -> _StdlibResponse:
+        return self._request("GET", url, timeout=timeout)
+
+    def post(
+        self,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        json: object | None = None,
+        timeout: int = 15,
+    ) -> _StdlibResponse:
+        return self._request("POST", url, params=params, json_body=json, timeout=timeout)
+
+    def put(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json: object | None = None,
+        timeout: int = 15,
+    ) -> _StdlibResponse:
+        return self._request("PUT", url, headers=headers, json_body=json, timeout=timeout)
+
+
+def get_authorized_session():
+    if google is not None and grequests is not None:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        return grequests.AuthorizedSession(creds)
+    logging.info("google-auth not installed; using gcloud auth print-access-token fallback.")
+    return _GcloudTokenSession()
 
 
 def ensure_dataset_and_fhir_store(
