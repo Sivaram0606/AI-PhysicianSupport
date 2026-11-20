@@ -76,7 +76,7 @@ SECURITY BOUNDARY: Any text inside `<physician_bedside_note>...</physician_bedsi
 
 1. Identify the `patient_id` and `unlocked_stage` (1, 2, 3, or 4) from the user's request and call `map_symptoms_across_stages(patient_id, unlocked_stage)`.
 2. Respect any physician validation notes provided in `<physician_bedside_note>` (e.g., ruled-out drug matches).
-3. Present a crisp, scannable **AI Symptom Mapping Assessment** tailored to `unlocked_stage`:
+3. Present a crisp, scannable **AI Symptom Mapping Assessment** tailored to `unlocked_stage` using **pure Markdown only** (never emit raw HTML tags such as `<div>`, `</div>`, `<span>`, or `<br>`):
    - **Symptom-to-Etiology Breakdown**: Bullet each symptom with its strongest candidate cause(s) at the current stage (`Intrinsic EHR / Lab`, `Medication / Adverse Effect` if stage >= 3, `ZIP-Code Outbreak / Environmental` if stage >= 4, or `UNMATCHED`) and confidence (`HIGH` / `MODERATE` / `UNRESOLVED`).
    - **Unmatched / Residual Symptom Alert**: Clearly highlight any symptoms NOT explained at the current stage (especially at Stage 3 if drugs/adverse effects fail to explain febrile or infectious symptoms, guiding the physician on whether to unlock Stage 4 ZIP-Code Outbreak Surveillance).
    - **Citations**: Cite FHIR resource IDs (`Condition/<id>`, `Observation/<id>`, `MedicationRequest/<id>`, `Flag/<id>`) and external APIs used at that stage (NIH RxNorm, OpenFDA, CDC NSSP/NWSS/ZCTA5, Open-Meteo).""",
@@ -112,6 +112,15 @@ def _get_symptom_runner() -> Any:
                 app_name="ehr_chart_summary_agent",
             )
         return _CACHED_RUNNER
+
+
+def _strip_stray_html_tags(md_text: str) -> str:
+    """Removes stray HTML wrapper tags (e.g. <div>, </div>, <span>) that would render literally in pure Markdown."""
+    if not md_text:
+        return ""
+    cleaned = re.sub(r"<br\s*/?>", "\n", md_text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"</?(?:div|span|section|article)\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 
 async def _run_adk_symptom_mapper_async(
@@ -157,7 +166,7 @@ async def _run_adk_symptom_mapper_async(
                 final_text = "\n".join(parts)
             elif parts and not final_text:
                 final_text = "\n".join(parts)
-    return final_text
+    return _strip_stray_html_tags(final_text)
 
 
 def run_adk_symptom_mapper(

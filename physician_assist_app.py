@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import os
+import re
 import ssl
 from datetime import datetime
 from pathlib import Path
@@ -139,11 +140,28 @@ def fmt_date(raw: Any) -> str:
         dt = datetime.strptime(s, "%Y-%m-%d")
         return dt.strftime("%b %d, %Y")
     except ValueError:
-        return html.escape(str(raw))
+        return esc(raw)
 
 
 def esc(val: Any) -> str:
-    return html.escape(str(val if val is not None else ""))
+    """HTML-escapes text and collapses embedded newlines so CommonMark HTML blocks never split."""
+    normalized = re.sub(r"[\r\n]+", " ", str(val if val is not None else "")).strip()
+    return html.escape(normalized)
+
+
+def render_html(raw_html: str) -> None:
+    """Renders custom HTML as a single unindented block so Markdown never leaks literal </div> tags."""
+    compact = re.sub(r"\n\s*", " ", raw_html).strip()
+    st.markdown(compact, unsafe_allow_html=True)
+
+
+def clean_agent_md(md_text: str) -> str:
+    """Strips stray HTML wrapper tags (e.g., <div>, </div>, <span>) from live LLM Markdown outputs."""
+    if not md_text:
+        return ""
+    cleaned = re.sub(r"<br\s*/?>", "\n", str(md_text), flags=re.IGNORECASE)
+    cleaned = re.sub(r"</?(?:div|span|section|article)\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 
 @st.cache_data(ttl=180, show_spinner=False)
@@ -308,8 +326,8 @@ button[data-baseweb="tab"][aria-selected="true"] {{
     margin-bottom: 1rem !important;
 }}
 
-/* Buttons */
-.stButton > button {{
+/* Buttons & Popover Triggers */
+.stButton button, .stPopover button {{
     border-radius: 8px !important;
     font-family: 'DM Sans', sans-serif !important;
     font-weight: 600 !important;
@@ -319,21 +337,21 @@ button[data-baseweb="tab"][aria-selected="true"] {{
     color: var(--text) !important;
     transition: all 0.18s ease !important;
 }}
-.stButton > button:hover:not(:disabled) {{
+.stButton button:hover:not(:disabled), .stPopover button:hover:not(:disabled) {{
     background: var(--card-hover) !important;
     border-color: var(--accent) !important;
     transform: translateY(-1px);
 }}
-.stButton > button[kind="primary"] {{
+.stButton button[kind="primary"], button[data-testid="stBaseButton-primary"] {{
     background: var(--accent) !important;
     color: #ffffff !important;
     border-color: var(--accent) !important;
 }}
-.stButton > button[kind="primary"]:hover:not(:disabled) {{
+.stButton button[kind="primary"]:hover:not(:disabled), button[data-testid="stBaseButton-primary"]:hover:not(:disabled) {{
     background: var(--accent-muted) !important;
     color: #ffffff !important;
 }}
-.stButton > button:disabled {{
+.stButton button:disabled {{
     opacity: 0.45 !important;
     cursor: not-allowed !important;
 }}
@@ -460,6 +478,9 @@ button[data-baseweb="tab"][aria-selected="true"] {{
 .badge-amber {{ color: var(--amber); background: var(--amber-muted); }}
 .badge-blue {{ color: #3b82f6; background: var(--blue-muted); }}
 .badge-mono {{
+    display: inline-block;
+    white-space: nowrap;
+    margin: 1px 0;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.72rem;
     color: var(--text-muted);
@@ -582,9 +603,62 @@ patient_options = {
 if st.session_state.selected_patient_id not in patient_options and patient_options:
     st.session_state.selected_patient_id = next(iter(patient_options))
 
-hdr_left, hdr_mid, hdr_right = st.columns([5.2, 3.6, 1.2], vertical_alignment="center")
+PUBLIC_API_REFERENCES: list[dict[str, str]] = [
+    {
+        "stage": "Step 3 · Pharmacology",
+        "name": "NIH NLM RxNorm REST API",
+        "endpoint": "https://rxnav.nlm.nih.gov/REST/",
+        "docs_url": "https://lhncbc.nlm.nih.gov/RxNav/APIs/RxNormAPIs.html",
+        "purpose": "Normalizes RxCUI codes, classifies Generic (IN/SCD) vs. Brand (BN/SBD), and detects duplicate active ingredients.",
+    },
+    {
+        "stage": "Step 3 · Pharmacology",
+        "name": "OpenFDA Drug Labeling (SPL) & DailyMed",
+        "endpoint": "https://api.fda.gov/drug/label.json",
+        "docs_url": "https://open.fda.gov/apis/drug/label/",
+        "purpose": "Retrieves official clinical indications, FDA Boxed Warnings, contraindications, and labeled adverse reactions.",
+    },
+    {
+        "stage": "Step 3 · Pharmacology",
+        "name": "OpenFDA FAERS Adverse Events API",
+        "endpoint": "https://api.fda.gov/drug/event.json",
+        "docs_url": "https://open.fda.gov/apis/drug/event/",
+        "purpose": "Queries post-marketing adverse event report counts across prescribed active ingredients.",
+    },
+    {
+        "stage": "Step 4 · ZIP Surveillance",
+        "name": "CDC NSSP Local Hospital ED Trajectories",
+        "endpoint": "https://data.cdc.gov/resource/rdmq-nq56.json",
+        "docs_url": "https://data.cdc.gov/d/rdmq-nq56",
+        "purpose": "Weekly local Emergency Department respiratory visit % and outbreak trends (Influenza, COVID-19, RSV).",
+    },
+    {
+        "stage": "Step 4 · ZIP Surveillance",
+        "name": "CDC NWSS Sewershed Wastewater PCR",
+        "endpoint": "https://data.cdc.gov/resource/ymmh-divb.json",
+        "docs_url": "https://www.cdc.gov/nwss/index.html",
+        "purpose": "Local sewershed viral PCR detections & surges (Flu A, SARS-CoV-2, RSV, Measles, Mpox on data.cdc.gov).",
+    },
+    {
+        "stage": "Step 4 · ZIP Surveillance",
+        "name": "CDC PLACES 5-Digit ZCTA5 Prevalence",
+        "endpoint": "https://data.cdc.gov/resource/qnzd-25i4.json",
+        "docs_url": "https://data.cdc.gov/d/qnzd-25i4",
+        "purpose": "Chronic/endemic disease prevalence and population strictly scoped to the patient's 5-digit ZIP code.",
+    },
+    {
+        "stage": "Step 4 · ZIP Surveillance",
+        "name": "Open-Meteo Air Quality & Zippopotam.us",
+        "endpoint": "https://air-quality-api.open-meteo.com/v1/air-quality",
+        "docs_url": "https://open-meteo.com/en/docs/air-quality-api",
+        "purpose": "Hyperlocal US AQI, PM2.5, PM10, Ozone, and NO2 respiratory triggers at the patient's ZIP coordinates.",
+    },
+]
+
+
+hdr_left, hdr_mid, hdr_apis, hdr_right = st.columns([4.7, 3.1, 1.25, 0.95], vertical_alignment="center")
 with hdr_left:
-    st.markdown(
+    render_html(
         f"""
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
             <div style="width:34px;height:34px;border-radius:9px;background:#2563eb;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:1rem;">◆</div>
@@ -598,8 +672,7 @@ with hdr_left:
             </div>
             <span class="badge badge-blue" style="margin-left:4px;">{esc(fhir_source_label)}</span>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 with hdr_mid:
@@ -617,11 +690,24 @@ with hdr_mid:
         on_change=_on_header_patient_change,
     )
 
+with hdr_apis:
+    with st.popover("🔗 Public APIs", width="stretch"):
+        st.markdown("**Live Public APIs & Clinical Data Sources**")
+        st.caption(
+            f"EHR data is pulled from **{fhir_source_label}** (cited by FHIR resource ID). "
+            "External pharmacology & neighborhood surveillance pull live from:"
+        )
+        for ref in PUBLIC_API_REFERENCES:
+            st.markdown(
+                f"- **[{ref['name']}]({ref['docs_url']})** *({ref['stage']})*  \n"
+                f"  `{ref['endpoint']}` — {ref['purpose']}"
+            )
+
 with hdr_right:
     theme_btn_label = "☀️ Light" if IS_DARK else "🌙 Dark"
     st.button(theme_btn_label, on_click=toggle_theme, width="stretch", key="theme_toggle_btn")
 
-st.markdown('<div style="height:0.35rem;"></div>', unsafe_allow_html=True)
+render_html('<div style="height:0.35rem;"></div>')
 
 active_pid: str = st.session_state.selected_patient_id
 pstate = get_pstate(active_pid)
@@ -683,7 +769,7 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
         elif unlocked >= 3:
             effective_unexplained_after_drugs.append(s["label"])
 
-    st.markdown(
+    render_html(
         f"""
         <div class="symptom-panel-shell">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
@@ -698,8 +784,7 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
                 <span class="badge badge-blue">{esc(scope_labels.get(unlocked, "Stage 1"))}</span>
             </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
     k1, k2, k3, k4 = st.columns(4)
@@ -714,11 +799,11 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
         zip_val = str(counts.get("zip_outbreak_matched", 0)) if unlocked >= 4 else "Gated"
         metric_card("ZIP Inf.", zip_val, f"ZIP {postal_code}" if unlocked >= 4 else "Step 4", "down" if counts.get("zip_outbreak_matched", 0) else "info")
 
-    st.markdown('<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
+    render_html('<div style="height:0.5rem;"></div>')
 
     # Alert banner when at Stage 3 and residual/unmatched symptoms exist (or physician ruled out drugs)
     if unlocked == 3 and effective_unexplained_after_drugs:
-        st.markdown(
+        render_html(
             f"""
             <div class="epa-card" style="border-color:var(--amber);background:var(--amber-muted);padding:0.85rem 1rem;">
                 <div style="font-size:0.8rem;font-weight:700;color:var(--amber);">
@@ -729,8 +814,7 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
                     Validate in Step 3 to unlock <b>Step 4: ZIP {esc(postal_code)} Outbreak Surveillance</b>.
                 </div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
 
     # Live Google ADK Multi-Agent Runner Button
@@ -752,7 +836,7 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
                     unlocked_stage=unlocked,
                     physician_validation_note=override_notes or pstate.get("drug_gate_note", ""),
                 )
-                pstate["adk_ai_mapping_md"] = ai_md
+                pstate["adk_ai_mapping_md"] = clean_agent_md(ai_md)
                 pstate["adk_ai_stage"] = unlocked
             except Exception as exc:
                 pstate["adk_ai_mapping_md"] = f"**ADK Agent Notice:** Could not reach Vertex AI (`{type(exc).__name__}`). Deterministic FHIR + RxNorm/OpenFDA/CDC symptom mapping remains active below."
@@ -763,7 +847,7 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
             f"✦ ADK Agent Clinical Synthesis (Stage {pstate.get('adk_ai_stage', unlocked)})",
             expanded=True,
         ):
-            st.markdown(pstate["adk_ai_mapping_md"])
+            st.markdown(clean_agent_md(pstate["adk_ai_mapping_md"]))
 
     if compact_side_panel and mapped_list:
         unmatched_only = st.toggle(
@@ -841,22 +925,19 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
             if unlocked >= 4:
                 ev_counts.append(f"{len(sym.get('outbreak_matches', []))} ZIP")
             ov_tag = f" · Override: {esc(override_val)}" if override_val != "Auto (Agent)" else ""
-            st.markdown(
-                (
-                    '<div class="epa-card" style="padding:0.7rem 0.85rem;margin-bottom:0.25rem;">'
-                    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;flex-wrap:wrap;">'
-                    f'<div style="font-size:0.82rem;font-weight:700;color:var(--text);">{esc(sym["label"])}</div>'
-                    f'{badge_html}'
-                    '</div>'
-                    '<div style="font-size:0.71rem;color:var(--text-muted);margin-top:3px;">'
-                    f'{esc(sym["observed_value"])} · {" · ".join(ev_counts)}{ov_tag}'
-                    '</div>'
-                    '</div>'
-                ),
-                unsafe_allow_html=True,
+            render_html(
+                '<div class="epa-card" style="padding:0.7rem 0.85rem;margin-bottom:0.25rem;">'
+                '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;flex-wrap:wrap;">'
+                f'<div style="font-size:0.82rem;font-weight:700;color:var(--text);">{esc(sym["label"])}</div>'
+                f'{badge_html}'
+                '</div>'
+                '<div style="font-size:0.71rem;color:var(--text-muted);margin-top:3px;">'
+                f'{esc(sym["observed_value"])} · {" · ".join(ev_counts)}{ov_tag}'
+                '</div>'
+                '</div>'
             )
             with st.expander("Evidence & Override", expanded=is_unmatched):
-                st.markdown(body_html, unsafe_allow_html=True)
+                render_html(body_html)
                 if unlocked >= 3:
                     options_ov = ["Auto (Agent)", "Confirmed Match", "Ruled Out (No Match)"]
                     new_ov = st.selectbox(
@@ -869,22 +950,19 @@ def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
                         pstate["symptom_overrides"][sid] = new_ov
                         st.rerun()
         else:
-            st.markdown(
-                (
-                    '<div class="epa-card" style="padding:0.95rem 1.05rem;margin-bottom:0.55rem;">'
-                    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">'
-                    '<div>'
-                    f'<div style="font-size:0.84rem;font-weight:700;color:var(--text);">{esc(sym["label"])}</div>'
-                    '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">'
-                    f'{esc(sym["category"])} · {esc(sym["observed_value"])} · <span class="badge-mono">{esc(sym["fhir_citation"])}</span>'
-                    '</div>'
-                    '</div>'
-                    f'{badge_html}'
-                    '</div>'
-                    f'<div style="margin-top:6px;">{body_html}</div>'
-                    '</div>'
-                ),
-                unsafe_allow_html=True,
+            render_html(
+                '<div class="epa-card" style="padding:0.95rem 1.05rem;margin-bottom:0.55rem;">'
+                '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">'
+                '<div>'
+                f'<div style="font-size:0.84rem;font-weight:700;color:var(--text);">{esc(sym["label"])}</div>'
+                '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">'
+                f'{esc(sym["category"])} · {esc(sym["observed_value"])} · <span class="badge-mono">{esc(sym["fhir_citation"])}</span>'
+                '</div>'
+                '</div>'
+                f'{badge_html}'
+                '</div>'
+                f'<div style="margin-top:6px;">{body_html}</div>'
+                '</div>'
             )
 
             options_ov = ["Auto (Agent)", "Confirmed Match", "Ruled Out (No Match)"]
@@ -922,24 +1000,38 @@ active_view = st.radio(
 # VIEW 1: EMERGENCY WARD PATIENT ROSTER (SELECT PATIENT)
 # ===========================================================================
 if active_view == "roster":
-    st.markdown(
-        f"""
-        <div class="epa-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-                <div>
-                    <div style="font-size:1.02rem;font-weight:700;color:var(--text);">
-                        Emergency Ward Active Patient Roster ({len(ward_patients)} Patients)
+    roster_hdr_col, roster_cta_col = st.columns([6.6, 3.4], vertical_alignment="center")
+    with roster_hdr_col:
+        render_html(
+            f"""
+            <div class="epa-card" style="margin-bottom:0.55rem;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+                    <div>
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <span class="badge badge-blue">STEP 1 · CHOOSE PATIENT</span>
+                            <span style="font-size:1.02rem;font-weight:700;color:var(--text);">
+                                Emergency Ward Active Patient Roster ({len(ward_patients)} Patients)
+                            </span>
+                        </div>
+                        <div style="font-size:0.79rem;color:var(--text-muted);margin-top:4px;">
+                            Click <b>Open Workspace →</b> on any patient below (or continue with the selected patient on the right) to proceed to <b>Page 2: Guided Clinical Investigation</b>.
+                        </div>
                     </div>
-                    <div style="font-size:0.79rem;color:var(--text-muted);margin-top:2px;">
-                        Select any patient below to review Longitudinal Medical Charts → 4-Track Swimlane → Drug &amp; Adverse Effects Validation → 5-Digit ZIP Outbreaks.
-                    </div>
+                    <span class="badge badge-green">Live HL7 FHIR R4 Connected</span>
                 </div>
-                <span class="badge badge-green">Live HL7 FHIR R4 Connected</span>
             </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            """
+        )
+    with roster_cta_col:
+        st.button(
+            f"Open Clinical Workspace: {demo.get('name', active_pid)} ({active_pid}) →",
+            key="roster_top_continue_cta",
+            type="primary",
+            width="stretch",
+            on_click=select_patient,
+            args=(active_pid,),
+            help="Advance immediately to Page 2 (Guided Clinical Investigation) for the selected patient.",
+        )
 
     search_q = st.text_input(
         "Filter Emergency Ward Roster by Name, Patient ID, Chief Complaint, or 5-Digit ZIP Code",
@@ -957,7 +1049,7 @@ if active_view == "roster":
         or search_q in p.get("location", "").lower()
     ]
 
-    # Styled HTML summary table + interactive one-click patient selector cards
+    # Styled HTML summary table + unmistakable one-click workspace launch buttons
     roster_rows = ""
     for p in filtered_patients:
         is_sel = p["patient_id"] == active_pid
@@ -967,19 +1059,25 @@ if active_view == "roster":
             stage_badge = '<span class="badge badge-green">ZIP Unlocked</span>'
         elif ps.get("drug_gate_confirmed_match"):
             stage_badge = '<span class="badge badge-green">Drug Etiology Confirmed</span>'
+        next_badge = (
+            '<span class="badge badge-blue">Selected · Ready to Open →</span>'
+            if is_sel
+            else '<span class="badge-mono">Click Button Below →</span>'
+        )
         sel_style = "background:var(--blue-muted);" if is_sel else ""
-        roster_rows += f"""
-        <tr style="{sel_style}">
-            <td><span class="badge-mono">{esc(p['patient_id'])}</span></td>
-            <td style="font-weight:600;">{esc(p['full_name'])}</td>
-            <td>{esc((p.get('gender') or '').capitalize())} · {fmt_date(p.get('birth_date'))}</td>
-            <td>{esc(p.get('city'))}, {esc(p.get('state'))} <span class="badge-mono">{esc(p.get('postal_code'))}</span></td>
-            <td>{esc(p.get('chief_complaint_today'))}</td>
-            <td>{stage_badge}</td>
-        </tr>
-        """
+        roster_rows += (
+            f'<tr style="{sel_style}">'
+            f'<td><span class="badge-mono">{esc(p["patient_id"])}</span></td>'
+            f'<td style="font-weight:600;">{esc(p["full_name"])}</td>'
+            f'<td>{esc((p.get("gender") or "").capitalize())} · {fmt_date(p.get("birth_date"))}</td>'
+            f'<td>{esc(p.get("city"))}, {esc(p.get("state"))} <span class="badge-mono">{esc(p.get("postal_code"))}</span></td>'
+            f'<td>{esc(p.get("chief_complaint_today"))}</td>'
+            f'<td>{stage_badge}</td>'
+            f'<td>{next_badge}</td>'
+            '</tr>'
+        )
 
-    st.markdown(
+    render_html(
         f"""
         <div class="data-table-wrap">
             <table class="data-table">
@@ -991,13 +1089,19 @@ if active_view == "roster":
                         <th>Location &amp; 5-Digit ZIP</th>
                         <th>Today's Chief Complaint</th>
                         <th>Workflow Status</th>
+                        <th>Next Step</th>
                     </tr>
                 </thead>
-                <tbody>{roster_rows.replace("\n", "")}</tbody>
+                <tbody>{roster_rows}</tbody>
             </table>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
+    )
+
+    render_html(
+        '<div style="font-size:0.84rem;font-weight:700;color:var(--text);margin:0.2rem 0 0.45rem;">'
+        'Click Any Patient Below to Open Their Guided Clinical Workspace (Page 2) &rarr;'
+        '</div>'
     )
 
     cols_per_row = 4
@@ -1006,11 +1110,7 @@ if active_view == "roster":
         for j, p in enumerate(filtered_patients[i : i + cols_per_row]):
             with row_cols[j]:
                 is_current = p["patient_id"] == active_pid
-                btn_lbl = (
-                    f"✓ Active: {p['patient_id']} · {p['full_name']}"
-                    if is_current
-                    else f"Select {p['patient_id']} · {p['full_name']}"
-                )
+                btn_lbl = f"Open {p['patient_id']} · {p['full_name']} →"
                 st.button(
                     btn_lbl,
                     key=f"roster_btn_{p['patient_id']}",
@@ -1019,6 +1119,16 @@ if active_view == "roster":
                     on_click=select_patient,
                     args=(p["patient_id"],),
                 )
+
+    render_html('<div style="height:0.35rem;"></div>')
+    st.button(
+        f"Proceed to Page 2: Guided Clinical Investigation for {demo.get('name', active_pid)} ({active_pid}) →",
+        key="roster_bottom_continue_cta",
+        type="primary",
+        width="stretch",
+        on_click=select_patient,
+        args=(active_pid,),
+    )
 
 # ===========================================================================
 # VIEW 2: SPLIT CLINICAL WORKSPACE (LEFT: 4-STAGE INVESTIGATION | RIGHT: SYMPTOM MAPPER UI)
@@ -1730,7 +1840,7 @@ elif active_view == "workspace":
 # VIEW 3: DEDICATED FULL-SCREEN SYMPTOM MAPPING MATRIX UI
 # ===========================================================================
 elif active_view == "sym_matrix":
-    st.markdown(
+    render_html(
         f"""
         <div class="epa-card">
             <div style="font-size:1.02rem;font-weight:700;color:var(--text);">
@@ -1740,8 +1850,7 @@ elif active_view == "sym_matrix":
                 Cross-maps every presenting symptom, triage vital abnormality, and acute lab derangement across Longitudinal EHR Conditions, RxNorm/OpenFDA Drug Adverse Effects, and 5-Digit ZIP ({esc(postal_code)}) Outbreaks.
             </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
     matrix_rows = ""
@@ -1763,18 +1872,18 @@ elif active_view == "sym_matrix":
                 or "—"
             )
         ov_state = pstate["symptom_overrides"].get(sym["symptom_id"], "Auto (Agent)")
-        matrix_rows += f"""
-        <tr>
-            <td style="font-weight:600;">{esc(sym['label'])}<br><span class="badge-mono">{esc(sym['fhir_citation'])}</span></td>
-            <td>{esc(sym['category'])}</td>
-            <td>{ehr_cell}</td>
-            <td>{drug_cell}</td>
-            <td>{zip_cell}</td>
-            <td><span class="badge badge-blue">{esc(ov_state)}</span></td>
-        </tr>
-        """
+        matrix_rows += (
+            f'<tr>'
+            f'<td style="font-weight:600;">{esc(sym["label"])}<br><span class="badge-mono">{esc(sym["fhir_citation"])}</span></td>'
+            f'<td>{esc(sym["category"])}</td>'
+            f'<td>{ehr_cell}</td>'
+            f'<td>{drug_cell}</td>'
+            f'<td>{zip_cell}</td>'
+            f'<td><span class="badge badge-blue">{esc(ov_state)}</span></td>'
+            f'</tr>'
+        )
 
-    st.markdown(
+    render_html(
         f"""
         <div class="data-table-wrap">
             <table class="data-table">
@@ -1788,11 +1897,58 @@ elif active_view == "sym_matrix":
                         <th>Physician Status</th>
                     </tr>
                 </thead>
-                <tbody>{matrix_rows.replace("\n", "")}</tbody>
+                <tbody>{matrix_rows}</tbody>
             </table>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
     render_symptom_mapping_ui(compact_side_panel=False)
+
+# ===========================================================================
+# PERSISTENT NON-DISRUPTIVE FOOTER: PUBLIC API & CLINICAL DATA REFERENCES
+# ===========================================================================
+render_html('<div style="height:1.1rem;"></div>')
+api_pills_html = " ".join(
+    f'<a href="{esc(r["docs_url"])}" target="_blank" rel="noopener noreferrer" '
+    f'style="text-decoration:none;"><span class="badge-mono" style="cursor:pointer;">{esc(r["name"])} ↗</span></a>'
+    for r in PUBLIC_API_REFERENCES
+)
+render_html(
+    f"""
+    <div style="border-top:1px solid var(--border);padding-top:0.85rem;margin-top:0.25rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div style="font-size:0.76rem;color:var(--text-muted);">
+            <b style="color:var(--text);">Live Public APIs Pulled:</b>&nbsp; {api_pills_html}
+        </div>
+        <span style="font-size:0.73rem;color:var(--text-muted);">EHR Source: {esc(fhir_source_label)}</span>
+    </div>
+    """
+)
+with st.expander("📚 Public API Endpoints & Clinical Data Reference Details", expanded=False):
+    ref_rows = "".join(
+        f'<tr>'
+        f'<td><span class="badge badge-blue">{esc(r["stage"])}</span></td>'
+        f'<td style="font-weight:600;"><a href="{esc(r["docs_url"])}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;">{esc(r["name"])} ↗</a></td>'
+        f'<td><span class="badge-mono">{esc(r["endpoint"])}</span></td>'
+        f'<td>{esc(r["purpose"])}</td>'
+        f'</tr>'
+        for r in PUBLIC_API_REFERENCES
+    )
+    render_html(
+        f"""
+        <div class="data-table-wrap" style="margin-bottom:0.2rem;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Workflow Stage</th>
+                        <th>Public API / Official Documentation</th>
+                        <th>Live REST Endpoint Pulled</th>
+                        <th>Clinical Role in Workspace</th>
+                    </tr>
+                </thead>
+                <tbody>{ref_rows}</tbody>
+            </table>
+        </div>
+        """
+    )
+
