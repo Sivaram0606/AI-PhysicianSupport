@@ -13,7 +13,7 @@ from google.adk.agents import LlmAgent
 
 from ...clinical_tools import get_location_outbreak_and_disease_data
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 outbreak_surveillance_agent = LlmAgent(
     name="outbreak_surveillance_agent",

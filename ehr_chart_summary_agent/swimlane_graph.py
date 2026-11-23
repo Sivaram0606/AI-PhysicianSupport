@@ -306,33 +306,17 @@ def build_markdown_swimlane_matrix(pdata: dict[str, Any]) -> str:
     return "\n".join(rows)
 
 
-def generate_interactive_swimlane_html(
+def render_interactive_swimlane_html(
     selected_patient_id: str,
     patients_swimlane_map: dict[str, dict[str, Any]],
 ) -> str:
     """
-    Generates a self-contained, XSS-hardened interactive HTML/SVG 4-Track Clinical Swimlane
-    viewer inside `<workspace>/outputs/clinical_swimlane_<patient_id>.html`.
+    Renders a self-contained, XSS-hardened interactive HTML/SVG 4-Track Clinical Swimlane
+    viewer in memory without performing disk I/O.
     """
     clean_pid = selected_patient_id.strip().lower()
     if not _SAFE_FILENAME_RE.match(clean_pid):
         raise ValueError("Invalid patient_id for swimlane output filename.")
-
-    custom_out = os.getenv("SWIMLANE_OUTPUT_DIR", "").strip()
-    if custom_out:
-        outputs_root = Path(custom_out).resolve()
-    else:
-        pkg_dir = Path(__file__).resolve().parent
-        base_dir = pkg_dir.parent if pkg_dir.name == "ehr_chart_summary_agent" else pkg_dir
-        outputs_root = (base_dir / "outputs").resolve()
-    try:
-        outputs_root.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        outputs_root = (Path(tempfile.gettempdir()) / "swimlane_outputs").resolve()
-        outputs_root.mkdir(parents=True, exist_ok=True)
-    target_path = (outputs_root / f"clinical_swimlane_{clean_pid}.html").resolve()
-    if outputs_root not in target_path.parents:
-        raise ValueError("Output path traversal blocked.")
 
     # Escape closing script sequences (`</`) to prevent script-context breakout (CWE-79)
     safe_payload_json = json.dumps(
@@ -346,7 +330,7 @@ def generate_interactive_swimlane_html(
 
     safe_title_id = re.sub(r"[^A-Za-z0-9_\-]", "", selected_patient_id)
 
-    html = f"""<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -769,5 +753,48 @@ def generate_interactive_swimlane_html(
 </body>
 </html>
 """
-    target_path.write_text(html, encoding="utf-8")
+
+
+def generate_interactive_swimlane_html(
+    selected_patient_id: str,
+    patients_swimlane_map: dict[str, dict[str, Any]],
+) -> str:
+    """
+    Generates a self-contained, XSS-hardened interactive HTML/SVG 4-Track Clinical Swimlane
+    viewer atomically inside `<workspace>/outputs/clinical_swimlane_<patient_id>.html`.
+    """
+    clean_pid = selected_patient_id.strip().lower()
+    if not _SAFE_FILENAME_RE.match(clean_pid):
+        raise ValueError("Invalid patient_id for swimlane output filename.")
+
+    html = render_interactive_swimlane_html(selected_patient_id, patients_swimlane_map)
+
+    custom_out = os.getenv("SWIMLANE_OUTPUT_DIR", "").strip()
+    if custom_out:
+        outputs_root = Path(custom_out).resolve()
+    else:
+        pkg_dir = Path(__file__).resolve().parent
+        base_dir = pkg_dir.parent if pkg_dir.name == "ehr_chart_summary_agent" else pkg_dir
+        outputs_root = (base_dir / "outputs").resolve()
+    try:
+        outputs_root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        outputs_root = (Path(tempfile.gettempdir()) / "swimlane_outputs").resolve()
+        outputs_root.mkdir(parents=True, exist_ok=True)
+    target_path = (outputs_root / f"clinical_swimlane_{clean_pid}.html").resolve()
+    if outputs_root not in target_path.parents:
+        raise ValueError("Output path traversal blocked.")
+
+    # Atomic write via temp file + os.replace to avoid concurrent read/write races
+    fd, tmp_name = tempfile.mkstemp(prefix=f".swimlane_{clean_pid}_", suffix=".tmp", dir=str(outputs_root))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(html)
+        os.replace(tmp_name, target_path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     return str(target_path)

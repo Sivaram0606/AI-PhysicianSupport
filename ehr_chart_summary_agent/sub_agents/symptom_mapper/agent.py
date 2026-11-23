@@ -34,7 +34,7 @@ from ...symptom_mapping_tools import (
     map_symptoms_across_stages,
 )
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.8-flash")
 _STRICT_PATIENT_ID_RE = re.compile(r"^[A-Za-z0-9._\-]{1,64}$")
 
@@ -154,18 +154,29 @@ async def _run_adk_symptom_mapper_async(
 
     msg = types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
     final_text = ""
-    async for event in runner.run_async(
-        user_id="ed_physician_ui",
-        session_id=session.id,
-        new_message=msg,
-    ):
-        author = getattr(event, "author", "")
-        if event.is_final_response() and event.content and event.content.parts:
-            parts = [p.text for p in event.content.parts if getattr(p, "text", None)]
-            if parts and author == "clinical_symptom_mapper_agent":
-                final_text = "\n".join(parts)
-            elif parts and not final_text:
-                final_text = "\n".join(parts)
+    try:
+        async for event in runner.run_async(
+            user_id="ed_physician_ui",
+            session_id=session.id,
+            new_message=msg,
+        ):
+            author = getattr(event, "author", "")
+            if event.is_final_response() and event.content and event.content.parts:
+                parts = [p.text for p in event.content.parts if getattr(p, "text", None)]
+                if parts and author == "clinical_symptom_mapper_agent":
+                    final_text = "\n".join(parts)
+                elif parts and not final_text:
+                    final_text = "\n".join(parts)
+    finally:
+        # Evict ephemeral session from InMemoryRunner to prevent unbounded memory growth
+        try:
+            await runner.session_service.delete_session(
+                app_name="ehr_chart_summary_agent",
+                user_id="ed_physician_ui",
+                session_id=session.id,
+            )
+        except Exception:
+            pass
     return _strip_stray_html_tags(final_text)
 
 

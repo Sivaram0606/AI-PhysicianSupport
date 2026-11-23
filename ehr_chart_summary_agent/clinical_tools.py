@@ -1218,7 +1218,7 @@ def get_location_outbreak_and_disease_data(
                     clean_city = str(spec["city"])
                 break
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=9) as pool:
         fut_places = pool.submit(_fetch_places_zcta)
 
         if resolved_lat is None or resolved_lon is None:
@@ -1237,6 +1237,59 @@ def get_location_outbreak_and_disease_data(
                                 clean_city = raw_city
             except (RequestException, ValueError, KeyError):
                 pass
+
+        # If coordinates are still missing, fall back to CDC PLACES coordinates before spatial lookups
+        places_resolved = False
+        zip_persistent_diseases: list[dict[str, Any]] = []
+        zip_total_pop: int | None = None
+        zip_adult_pop: int | None = None
+        places_cit: dict[str, Any] | None = None
+        if resolved_lat is None or resolved_lon is None:
+            zip_persistent_diseases, zip_total_pop, zip_adult_pop, plat, plon, places_cit = fut_places.result()
+            places_resolved = True
+            if plat is not None and plon is not None:
+                resolved_lat, resolved_lon = plat, plon
+
+        def _fetch_zip_air_quality() -> dict[str, Any]:
+            if resolved_lat is None or resolved_lon is None:
+                return {}
+            aq_url = (
+                f"https://air-quality-api.open-meteo.com/v1/air-quality"
+                f"?latitude={resolved_lat}&longitude={resolved_lon}&current=us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide"
+            )
+            try:
+                r_aq = _HTTP_SESSION.get(
+                    "https://air-quality-api.open-meteo.com/v1/air-quality",
+                    params={
+                        "latitude": resolved_lat,
+                        "longitude": resolved_lon,
+                        "current": "us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide",
+                    },
+                    timeout=(4, 7),
+                )
+                if r_aq.status_code == 200:
+                    curr = r_aq.json().get("current", {})
+                    aq_cit = {
+                        "information_covered": f"Hyperlocal Air Quality & Respiratory Triggers in ZIP Code {zip5}",
+                        "source_name": f"Open-Meteo Hyperlocal Air Quality API — ZIP {zip5} ({resolved_lat}, {resolved_lon})",
+                        "api_endpoint_url": aq_url,
+                        "documentation_url": "https://open-meteo.com/en/docs/air-quality-api",
+                    }
+                    return {
+                        "zip_code": zip5,
+                        "us_aqi": curr.get("us_aqi"),
+                        "pm2_5_ug_m3": curr.get("pm2_5"),
+                        "pm10_ug_m3": curr.get("pm10"),
+                        "ozone_ug_m3": curr.get("ozone"),
+                        "nitrogen_dioxide_ug_m3": curr.get("nitrogen_dioxide"),
+                        "citation": aq_cit,
+                    }
+            except RequestException:
+                pass
+            return {}
+
+        # Start Air Quality lookup immediately in parallel with CDC Census Tract lookup (no FIPS needed)
+        fut_aq = pool.submit(_fetch_zip_air_quality)
 
         # Resolve the exact local Census Tract & 5-digit catchment FIPS physically containing ZIP code `zip5`
         local_fips = ""
@@ -1310,54 +1363,16 @@ def get_location_outbreak_and_disease_data(
                 pass
             return {}
 
-        def _fetch_zip_air_quality() -> dict[str, Any]:
-            if resolved_lat is None or resolved_lon is None:
-                return {}
-            aq_url = (
-                f"https://air-quality-api.open-meteo.com/v1/air-quality"
-                f"?latitude={resolved_lat}&longitude={resolved_lon}&current=us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide"
-            )
-            try:
-                r_aq = _HTTP_SESSION.get(
-                    "https://air-quality-api.open-meteo.com/v1/air-quality",
-                    params={
-                        "latitude": resolved_lat,
-                        "longitude": resolved_lon,
-                        "current": "us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide",
-                    },
-                    timeout=(4, 7),
-                )
-                if r_aq.status_code == 200:
-                    curr = r_aq.json().get("current", {})
-                    aq_cit = {
-                        "information_covered": f"Hyperlocal Air Quality & Respiratory Triggers in ZIP Code {zip5}",
-                        "source_name": f"Open-Meteo Hyperlocal Air Quality API — ZIP {zip5} ({resolved_lat}, {resolved_lon})",
-                        "api_endpoint_url": aq_url,
-                        "documentation_url": "https://open-meteo.com/en/docs/air-quality-api",
-                    }
-                    return {
-                        "zip_code": zip5,
-                        "us_aqi": curr.get("us_aqi"),
-                        "pm2_5_ug_m3": curr.get("pm2_5"),
-                        "pm10_ug_m3": curr.get("pm10"),
-                        "ozone_ug_m3": curr.get("ozone"),
-                        "nitrogen_dioxide_ug_m3": curr.get("nitrogen_dioxide"),
-                        "citation": aq_cit,
-                    }
-            except RequestException:
-                pass
-            return {}
-
         fut_ed = pool.submit(_fetch_local_ed)
-        fut_aq = pool.submit(_fetch_zip_air_quality)
         fut_nwss = [
             pool.submit(_fetch_local_sewershed_pathogen, p_name, ds_id, local_fips, zip5)
             for p_name, ds_id in _NWSS_PATHOGEN_DATASETS
         ]
 
-        zip_persistent_diseases, zip_total_pop, zip_adult_pop, plat, plon, places_cit = fut_places.result()
-        if resolved_lat is None or resolved_lon is None:
-            resolved_lat, resolved_lon = plat, plon
+        if not places_resolved:
+            zip_persistent_diseases, zip_total_pop, zip_adult_pop, plat, plon, places_cit = fut_places.result()
+            if resolved_lat is None or resolved_lon is None:
+                resolved_lat, resolved_lon = plat, plon
         if places_cit:
             citations.append(places_cit)
 

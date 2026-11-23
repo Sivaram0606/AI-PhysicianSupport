@@ -29,7 +29,7 @@ for candidate_env in (
     Path(__file__).resolve().parent / ".env",
 ):
     if candidate_env.exists():
-        load_dotenv(candidate_env, override=True)
+        load_dotenv(candidate_env, override=False)
         break
 
 try:
@@ -159,7 +159,7 @@ def run_deterministic_trace(patient_id: str) -> None:
     for lab in labs_data["labs_and_diagnostics"]["longitudinal_labs"]:
         traj = " -> ".join(f"{h['value']} [{h['flag']}] ({h['date']})" for h in lab["history"])
         print(f"- **{lab['test']}** (Ref `{lab['ref_range']}`): {traj}")
-    for enc in encounters_data.get("recent_encounters_and_notes", []):
+    for enc in encounters_data.get("encounters_and_notes", []):
         print(f"- **Encounter ({enc.get('date')})**: {enc.get('type')} — {enc.get('primary_diagnosis')}")
     for idx, item in enumerate(loops_data["unresolved_items_and_care_gaps"], start=1):
         print(f"- **Open Loop {idx} [{item['priority']}] {item['category']}**: {item['details']}")

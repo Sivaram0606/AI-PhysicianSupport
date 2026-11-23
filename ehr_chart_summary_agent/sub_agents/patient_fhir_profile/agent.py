@@ -13,7 +13,7 @@ from google.adk.agents import LlmAgent
 
 from ...clinical_tools import get_patient_clinical_profile, list_emergency_ward_patients
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 patient_fhir_agent = LlmAgent(
     name="patient_fhir_agent",

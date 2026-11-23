@@ -14,7 +14,7 @@ from google.adk.agents import LlmAgent
 
 from ...clinical_tools import get_drug_adverse_events_faers
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 
 def get_adverse_effects(drug_name: str) -> dict[str, Any]:

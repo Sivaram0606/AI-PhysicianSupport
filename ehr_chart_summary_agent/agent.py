@@ -10,7 +10,7 @@ if not os.environ.get("SSL_CERT_FILE") and ssl.get_default_verify_paths().cafile
 
 from google.adk.agents import LlmAgent
 
-load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.8-flash")
 
 from .sub_agents.get_adverse_effects import adverse_effects_agent
