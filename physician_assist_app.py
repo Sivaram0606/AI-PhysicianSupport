@@ -53,7 +53,10 @@ from ehr_chart_summary_agent.ehr_chart_tools import (
     get_patient_demographics_and_triage,
 )
 from ehr_chart_summary_agent.sub_agents.symptom_mapper import run_adk_symptom_mapper
-from ehr_chart_summary_agent.symptom_mapping_tools import compute_symptom_mappings
+from ehr_chart_summary_agent.symptom_mapping_tools import (
+    build_competing_hypotheses,
+    compute_symptom_mappings,
+)
 
 # ---------------------------------------------------------------------------
 # 1. Page Config & Session State Initialization
@@ -531,7 +534,100 @@ button[data-baseweb="tab"][aria-selected="true"] {{
     background: var(--bg-subtle);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1.05rem 1.15rem;
+    padding: 0.95rem 1.05rem;
+    margin-bottom: 0.65rem;
+}}
+.hyp-coverage-track {{
+    width: 100%;
+    height: 8px;
+    background: var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 8px;
+}}
+.hyp-coverage-fill {{
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.25s ease;
+}}
+.hyp-card {{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 4px solid #2563eb;
+    border-radius: 10px;
+    padding: 0.88rem 0.98rem;
+    margin-bottom: 0.62rem;
+    box-shadow: var(--shadow);
+    transition: border-color 0.18s ease, background-color 0.18s ease;
+}}
+.hyp-card-strong {{ border-left-color: var(--green); }}
+.hyp-card-partial {{ border-left-color: var(--amber); }}
+.hyp-card-outbreak {{ border-left-color: var(--red); }}
+.hyp-card-baseline {{ border-left-color: #2563eb; }}
+.hyp-card-locked {{
+    border-left-color: var(--border);
+    background: var(--bg-subtle);
+    opacity: 0.78;
+}}
+.hyp-chip-wrap {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 5px;
+}}
+.chip-explain {{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.71rem;
+    font-weight: 600;
+    color: var(--green);
+    background: var(--green-muted);
+    border: 1px solid rgba(34,197,94,0.25);
+    cursor: help;
+    white-space: nowrap;
+}}
+.chip-resolved {{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.71rem;
+    font-weight: 700;
+    color: #2563eb;
+    background: var(--blue-muted);
+    border: 1px solid rgba(37,99,235,0.35);
+    cursor: help;
+    white-space: nowrap;
+}}
+.chip-gap {{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.71rem;
+    font-weight: 600;
+    color: var(--red);
+    background: var(--red-muted);
+    border: 1px solid rgba(239,68,68,0.25);
+    white-space: nowrap;
+}}
+.chip-gap-muted {{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.71rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    white-space: nowrap;
 }}
 </style>
 """,
@@ -743,239 +839,395 @@ symptom_map_data = compute_symptom_mappings(
 
 
 # ---------------------------------------------------------------------------
-# 5. Reusable Symptom Mapping UI Renderer (Right Panel + Dedicated Full Tab)
+# 5. Competing Hypotheses Scorecard Renderer (Right Panel + Dedicated View 3)
 # ---------------------------------------------------------------------------
+def _truncate_text(raw: str, limit: int = 68) -> str:
+    s = str(raw or "").strip()
+    return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
+
+
+def build_hypothesis_card_html(
+    card: dict[str, Any],
+    rank_num: int | None = None,
+) -> str:
+    """Renders a single Root-Cause Hypothesis Card with ✓ Explains and ✗ Cannot Explain chips."""
+    cid = card["id"]
+    state = card["state"]
+    fit_level = card["fit_level"]
+    badge_txt = card["fit_badge"]
+
+    # Reflect bedside physician confirmation / rule-out state directly on the Drug card
+    if cid == "drug_ae" and state == "ACTIVE":
+        if pstate.get("drug_gate_confirmed_match") and not pstate.get("drug_gate_validated_no_match"):
+            badge_cls = "badge-green"
+            badge_txt = f"✓ Confirmed · {card['explained_count']}/{card['total_count']}"
+            card_mod = "hyp-card-strong"
+        elif pstate.get("drug_gate_validated_no_match"):
+            badge_cls = "badge-amber"
+            badge_txt = f"Ruled Out Sole Cause · {card['explained_count']}/{card['total_count']}"
+            card_mod = "hyp-card-partial"
+        elif fit_level == "STRONG":
+            badge_cls = "badge-green"
+            card_mod = "hyp-card-strong"
+        elif fit_level == "PARTIAL":
+            badge_cls = "badge-amber"
+            card_mod = "hyp-card-partial"
+        else:
+            badge_cls = "badge-red"
+            card_mod = "hyp-card-partial"
+    elif state in ("LOCKED", "GATED"):
+        badge_cls = "badge-mono"
+        card_mod = "hyp-card-locked"
+    elif fit_level == "RESOLVES_GAPS":
+        badge_cls = "badge-red"
+        card_mod = "hyp-card-outbreak"
+    elif fit_level == "STRONG":
+        badge_cls = "badge-green"
+        card_mod = "hyp-card-strong"
+    elif cid == "ehr_baseline":
+        badge_cls = "badge-blue"
+        card_mod = "hyp-card-baseline"
+    elif fit_level == "PARTIAL":
+        badge_cls = "badge-amber"
+        card_mod = "hyp-card-partial"
+    else:
+        badge_cls = "badge-mono"
+        card_mod = "hyp-card-baseline"
+
+    rank_prefix = (
+        f'<span class="badge-mono" style="margin-right:6px;">#{rank_num}</span>'
+        if rank_num is not None
+        else ""
+    )
+    badge_span = (
+        f'<span class="{badge_cls}">{esc(badge_txt)}</span>'
+        if badge_cls == "badge-mono"
+        else f'<span class="badge {badge_cls}">{esc(badge_txt)}</span>'
+    )
+    culprit_full = card.get("culprit_summary", "")
+    culprit_disp = _truncate_text(culprit_full, 72)
+
+    if state == "LOCKED":
+        inner_html = (
+            '<div style="font-size:0.74rem;color:var(--text-muted);margin-top:6px;line-height:1.45;">'
+            'Audits prescribed, held &amp; OTC drugs via NIH RxNorm &amp; OpenFDA in <b>Step 3</b> to test whether medication toxicity or non-adherence explains this presentation.'
+            '</div>'
+        )
+    elif state == "GATED":
+        inner_html = (
+            '<div style="font-size:0.74rem;color:var(--text-muted);margin-top:6px;line-height:1.45;">'
+            f'Gated behind <b>Step 3 Medication Check</b> — unlocks hyperlocal <b>ZIP {esc(postal_code)}</b> ED, wastewater PCR &amp; AQI correlation if drugs leave residual symptoms.'
+            '</div>'
+        )
+    else:
+        explains = card.get("explains", [])
+        gaps = card.get("cannot_explain", [])
+
+        if explains:
+            exp_chips = "".join(
+                (
+                    f'<span class="chip-resolved" title="{esc("Resolves Drug Gap — " + item["detail"] + " [" + item["citation"] + "]")}">'
+                    f'★ {esc(item["short_label"])}</span>'
+                    if item.get("resolves_drug_gap")
+                    else f'<span class="chip-explain" title="{esc(item["detail"] + " [" + item["citation"] + "]")}">'
+                    f'✓ {esc(item["short_label"])}</span>'
+                )
+                for item in explains
+            )
+            exp_block = (
+                f'<div style="font-size:0.7rem;font-weight:700;color:var(--text-muted);margin-top:7px;text-transform:uppercase;letter-spacing:0.03em;">'
+                f'Explains ({len(explains)}/{card["total_count"]})'
+                f'</div>'
+                f'<div class="hyp-chip-wrap">{exp_chips}</div>'
+            )
+        else:
+            exp_block = (
+                '<div style="font-size:0.74rem;color:var(--text-muted);margin-top:7px;">'
+                'Does not match any extracted presenting findings.'
+                '</div>'
+            )
+
+        if not gaps and card["total_count"] > 0:
+            gap_block = (
+                '<div style="font-size:0.73rem;font-weight:600;color:var(--green);margin-top:7px;">'
+                '✓ Accounts for 100% of presenting symptoms, vitals &amp; acute labs'
+                '</div>'
+            )
+        elif gaps:
+            is_zip_card = cid == "zip_outbreak"
+            gap_hdr = "Non-Infectious / Baseline Signs" if is_zip_card else f"Cannot Explain ({len(gaps)})"
+            gap_chips = "".join(
+                (
+                    f'<span class="chip-gap-muted" title="{esc(g["label"])}">— {esc(g["short_label"])}</span>'
+                    if is_zip_card
+                    else f'<span class="chip-gap" title="{esc(g["label"])}">✗ {esc(g["short_label"])}</span>'
+                )
+                for g in gaps
+            )
+            gap_block = (
+                f'<div style="font-size:0.7rem;font-weight:700;color:var(--text-muted);margin-top:7px;text-transform:uppercase;letter-spacing:0.03em;">'
+                f'{esc(gap_hdr)}'
+                f'</div>'
+                f'<div class="hyp-chip-wrap">{gap_chips}</div>'
+            )
+        else:
+            gap_block = ""
+
+        inner_html = exp_block + gap_block
+
+    return (
+        f'<div class="hyp-card {card_mod}">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">'
+        f'<div style="font-size:0.73rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.03em;">'
+        f'{rank_prefix}{esc(card["domain_title"])}'
+        f'</div>'
+        f'{badge_span}'
+        f'</div>'
+        f'<div style="font-size:0.86rem;font-weight:700;color:var(--text);margin-top:4px;" title="{esc(culprit_full)}">'
+        f'{esc(culprit_disp)}'
+        f'</div>'
+        f'<div style="font-size:0.7rem;color:var(--text-muted);margin-top:1px;">{esc(card["source_tag"])}</div>'
+        f'{inner_html}'
+        f'</div>'
+    )
+
+
+def _get_live_competing_hypotheses() -> tuple[dict[str, Any], set[str]]:
+    """Computes competing hypotheses dynamically incorporating any ruled-out drugs in Step 3."""
+    ruled_out_meds = {
+        med
+        for med, dec in pstate["drug_decisions"].items()
+        if dec in ("Ruled Out (No Match)", "Rule Out (No Match)")
+    }
+    competing = build_competing_hypotheses(
+        mapped_symptoms=symptom_map_data.get("mapped_symptoms", []),
+        unlocked_stage=pstate["unlocked_stage"],
+        postal_code=postal_code,
+        ruled_out_medications=ruled_out_meds,
+    )
+    return competing, ruled_out_meds
+
+
 def render_symptom_mapping_ui(compact_side_panel: bool = True) -> None:
-    """Renders the Separate Symptom Mapping Agent UI with physician overrides and ADK synthesis."""
-    counts = symptom_map_data.get("summary_counts", {})
+    """Renders the Option 1 Competing Hypotheses Scorecard UI with 1-click bedside actions."""
     mapped_list: list[dict[str, Any]] = symptom_map_data.get("mapped_symptoms", [])
     unlocked = pstate["unlocked_stage"]
+    competing, ruled_out_meds = _get_live_competing_hypotheses()
+
+    total_f = competing["total_findings"]
+    overall_exp = competing["overall_explained"]
+    cov_pct = competing["coverage_pct"]
+    drug_exp = competing["drug_explained_count"]
+    drug_gaps_cnt = competing["drug_unexplained_count"]
+    resolves_cnt = competing["resolves_drug_gaps_count"]
 
     scope_labels = {
-        1: "Stage 1 Scope · Longitudinal EHR Only",
-        2: "Stage 2 Scope · Longitudinal EHR + 4-Track Swimlane",
-        3: "Stage 3 Scope · EHR + NIH RxNorm & OpenFDA Adverse Effects",
-        4: f"Stage 4 Scope · Full Differential + ZIP {postal_code} Outbreaks",
+        1: "Stage 1 · EHR Baseline",
+        2: "Stage 2 · EHR + Swimlane",
+        3: "Stage 3 · Medication Gate",
+        4: f"Stage 4 · Full + ZIP {postal_code}",
     }
 
-    # Recompute effective drug match count after physician bedside overrides
-    effective_drug_matches = 0
-    effective_unexplained_after_drugs: list[str] = []
-    for s in mapped_list:
-        ov = pstate["symptom_overrides"].get(s["symptom_id"], "Auto (Agent)")
-        has_drug = len(s.get("drug_matches", [])) > 0 and ov != "Ruled Out (No Match)"
-        if has_drug:
-            effective_drug_matches += 1
-        elif unlocked >= 3:
-            effective_unexplained_after_drugs.append(s["label"])
+    # Determine coverage bar color & concise clinical status takeaway
+    if unlocked == 3:
+        bar_pct = competing["drug_coverage_pct"]
+        if drug_gaps_cnt == 0 and total_f > 0:
+            bar_color = "var(--green)"
+            status_line = f"✓ Medications account for all {drug_exp}/{total_f} acute findings"
+        else:
+            bar_color = "var(--amber)"
+            gap_preview = ", ".join(competing["drug_unexplained_chips"][:3])
+            status_line = f"⚠ Meds explain {drug_exp}/{total_f} · Leaves {drug_gaps_cnt} unexplained ({gap_preview})"
+        cov_headline = f"Medication Fit: {drug_exp}/{total_f} ({bar_pct}%)"
+    elif unlocked >= 4:
+        bar_pct = cov_pct
+        bar_color = "var(--green)" if overall_exp == total_f else "#2563eb"
+        if resolves_cnt > 0:
+            status_line = f"★ ZIP {postal_code} outbreak data resolves {resolves_cnt} finding(s) unexplained by medications"
+        else:
+            status_line = f"✓ {overall_exp}/{total_f} findings mapped across EHR, Medications & ZIP {postal_code}"
+        cov_headline = f"Diagnostic Coverage: {overall_exp}/{total_f} ({cov_pct}%)"
+    else:
+        bar_pct = cov_pct
+        bar_color = "#2563eb"
+        unm_cnt = competing["overall_unexplained_count"]
+        status_line = (
+            f"{overall_exp}/{total_f} matched to baseline EHR · Audit medications in Step 3 to test acute cause"
+            if unm_cnt == 0
+            else f"{overall_exp}/{total_f} in baseline EHR · {unm_cnt} acute sign(s) need Step 3–4 check"
+        )
+        cov_headline = f"Baseline Coverage: {overall_exp}/{total_f} ({cov_pct}%)"
 
     render_html(
         f"""
         <div class="symptom-panel-shell">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
                 <div>
                     <div style="font-size:0.95rem;font-weight:700;color:var(--text);">
-                        Symptom Mapping Assistant UI
+                        Competing Hypotheses Scorecard
                     </div>
-                    <div style="font-size:0.74rem;color:var(--text-muted);margin-top:2px;">
-                        Dedicated stage-aware differential tracker · Patient <span style="font-family:'JetBrains Mono',monospace;">{esc(active_pid)}</span>
+                    <div style="font-size:0.73rem;color:var(--text-muted);margin-top:1px;">
+                        Root-cause fit across clinical stages · Hover <span style="color:var(--green);font-weight:600;">✓</span> chips for proof
                     </div>
                 </div>
                 <span class="badge badge-blue">{esc(scope_labels.get(unlocked, "Stage 1"))}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:0.76rem;font-weight:700;color:var(--text);">
+                <span>{esc(cov_headline)}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:var(--text-muted);">{total_f} Extracted Signs</span>
+            </div>
+            <div class="hyp-coverage-track">
+                <div class="hyp-coverage-fill" style="width:{max(4, bar_pct)}%;background:{bar_color};"></div>
+            </div>
+            <div style="font-size:0.73rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">
+                {esc(status_line)}
             </div>
         </div>
         """
     )
 
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        metric_card("Signs", str(counts.get("total_symptoms", 0)), "Extracted", "info")
-    with k2:
-        metric_card("EHR", str(counts.get("ehr_matched", 0)), "Chart/Labs", "info")
-    with k3:
-        drug_val = str(effective_drug_matches) if unlocked >= 3 else "Locked"
-        metric_card("Drug AE", drug_val, "Step 3" if unlocked < 3 else "Validated", "warn" if effective_drug_matches else "info")
-    with k4:
-        zip_val = str(counts.get("zip_outbreak_matched", 0)) if unlocked >= 4 else "Gated"
-        metric_card("ZIP Inf.", zip_val, f"ZIP {postal_code}" if unlocked >= 4 else "Step 4", "down" if counts.get("zip_outbreak_matched", 0) else "info")
-
-    render_html('<div style="height:0.5rem;"></div>')
-
-    # Alert banner when at Stage 3 and residual/unmatched symptoms exist (or physician ruled out drugs)
-    if unlocked == 3 and effective_unexplained_after_drugs:
-        render_html(
-            f"""
-            <div class="epa-card" style="border-color:var(--amber);background:var(--amber-muted);padding:0.85rem 1rem;">
-                <div style="font-size:0.8rem;font-weight:700;color:var(--amber);">
-                    ⚠ {len(effective_unexplained_after_drugs)} Symptom(s) Not Explained by Medications
-                </div>
-                <div style="font-size:0.76rem;color:var(--text);margin-top:4px;">
-                    Unmatched by current/stopped drugs: <b>{esc(", ".join(effective_unexplained_after_drugs[:4]))}</b>.
-                    Validate in Step 3 to unlock <b>Step 4: ZIP {esc(postal_code)} Outbreak Surveillance</b>.
-                </div>
-            </div>
-            """
-        )
-
-    # Live Google ADK Multi-Agent Runner Button
+    # Render Ranked Root-Cause Hypothesis Cards (2-3 cards instead of 10+ symptom dropdown cards)
     btn_suffix = "side" if compact_side_panel else "full"
+    for idx, hcard in enumerate(competing["hypotheses"], start=1):
+        render_html(build_hypothesis_card_html(hcard, rank_num=idx))
+
+        # Contextual 1-Click Bedside Action Buttons directly beneath the Drug Hypothesis Card
+        if hcard["id"] == "drug_ae":
+            if unlocked < 3:
+                if st.button(
+                    "Audit Medications & Adverse Effects (Step 3) →",
+                    key=f"hyp_jump_step3_{active_pid}_{btn_suffix}",
+                    width="stretch",
+                ):
+                    pstate["unlocked_stage"] = max(unlocked, 3)
+                    pstate["active_stage"] = 3
+                    st.rerun()
+            elif unlocked == 3:
+                act_c1, act_c2 = st.columns(2)
+                if drug_gaps_cnt > 0:
+                    with act_c1:
+                        if st.button(
+                            f"→ {drug_gaps_cnt} Gap{'s' if drug_gaps_cnt != 1 else ''} · Unlock ZIP {postal_code}",
+                            key=f"hyp_unlock_zip_{active_pid}_{btn_suffix}",
+                            type="primary",
+                            width="stretch",
+                            help="Mark medications insufficient as sole cause and unlock Step 4 ZIP Outbreak Surveillance.",
+                        ):
+                            pstate["drug_gate_validated_no_match"] = True
+                            pstate["drug_gate_timestamp"] = datetime.now().strftime("%b %d, %Y %H:%M")
+                            pstate["unlocked_stage"] = 4
+                            pstate["active_stage"] = 4
+                            st.rerun()
+                    with act_c2:
+                        if st.button(
+                            "✓ Confirm Drug Cause",
+                            key=f"hyp_confirm_drug_{active_pid}_{btn_suffix}",
+                            width="stretch",
+                        ):
+                            pstate["drug_gate_confirmed_match"] = True
+                            pstate["drug_gate_confirmed_timestamp"] = datetime.now().strftime("%b %d, %Y %H:%M")
+                            st.rerun()
+                else:
+                    with act_c1:
+                        if st.button(
+                            "✓ Confirm Drug Cause (100% Fit)",
+                            key=f"hyp_confirm_drug_full_{active_pid}_{btn_suffix}",
+                            type="primary",
+                            width="stretch",
+                        ):
+                            pstate["drug_gate_confirmed_match"] = True
+                            pstate["drug_gate_confirmed_timestamp"] = datetime.now().strftime("%b %d, %Y %H:%M")
+                            st.rerun()
+                    with act_c2:
+                        if st.button(
+                            f"Check ZIP {postal_code} Anyway →",
+                            key=f"hyp_unlock_zip_anyway_{active_pid}_{btn_suffix}",
+                            width="stretch",
+                        ):
+                            pstate["drug_gate_validated_no_match"] = True
+                            pstate["drug_gate_timestamp"] = datetime.now().strftime("%b %d, %Y %H:%M")
+                            pstate["unlocked_stage"] = 4
+                            pstate["active_stage"] = 4
+                            st.rerun()
+
+    if unlocked >= 4 and pstate["active_stage"] != 4 and compact_side_panel:
+        if st.button(
+            f"Open Step 4: ZIP {postal_code} Outbreak Dashboard →",
+            key=f"hyp_open_step4_{active_pid}_{btn_suffix}",
+            width="stretch",
+        ):
+            pstate["active_stage"] = 4
+            st.rerun()
+
+    # Live Google ADK Hypothesis Verdict (Concise 3-Part Clinical Synthesis)
     run_adk_clicked = st.button(
-        f"✦ Run Live ADK Symptom Mapper Agent (Stage {unlocked})",
+        f"✦ Generate AI Clinical Verdict (Stage {unlocked})",
         key=f"run_adk_sym_{active_pid}_{unlocked}_{btn_suffix}",
-        type="primary",
+        type="primary" if unlocked >= 4 else "secondary",
         width="stretch",
     )
     if run_adk_clicked:
-        override_notes = ", ".join(
-            f"{sid}={val}" for sid, val in pstate["symptom_overrides"].items() if val != "Auto (Agent)"
-        )
-        with st.spinner("Running Google ADK `symptom_mapping_pipeline` (`symptom_extractor_agent` -> `clinical_symptom_mapper_agent`)..."):
+        bedside_context_parts: list[str] = []
+        if ruled_out_meds:
+            bedside_context_parts.append(f"Physician ruled out medications: {', '.join(sorted(ruled_out_meds))}")
+        if pstate.get("drug_gate_note"):
+            bedside_context_parts.append(pstate["drug_gate_note"])
+        with st.spinner("Synthesizing concise Competing Hypotheses Verdict via Google ADK..."):
             try:
                 ai_md = run_adk_symptom_mapper(
                     patient_id=active_pid,
                     unlocked_stage=unlocked,
-                    physician_validation_note=override_notes or pstate.get("drug_gate_note", ""),
+                    physician_validation_note="; ".join(bedside_context_parts),
                 )
                 pstate["adk_ai_mapping_md"] = clean_agent_md(ai_md)
                 pstate["adk_ai_stage"] = unlocked
             except Exception as exc:
-                pstate["adk_ai_mapping_md"] = f"**ADK Agent Notice:** Could not reach Vertex AI (`{type(exc).__name__}`). Deterministic FHIR + RxNorm/OpenFDA/CDC symptom mapping remains active below."
+                pstate["adk_ai_mapping_md"] = (
+                    f"**ADK Agent Notice:** Could not reach Vertex AI (`{type(exc).__name__}`). "
+                    "Deterministic Competing Hypotheses Scorecard above remains fully active."
+                )
                 pstate["adk_ai_stage"] = unlocked
 
     if pstate.get("adk_ai_mapping_md"):
         with st.expander(
-            f"✦ ADK Agent Clinical Synthesis (Stage {pstate.get('adk_ai_stage', unlocked)})",
+            f"✦ AI Competing Hypotheses Verdict (Stage {pstate.get('adk_ai_stage', unlocked)})",
             expanded=True,
         ):
             st.markdown(clean_agent_md(pstate["adk_ai_mapping_md"]))
 
-    if compact_side_panel and mapped_list:
-        unmatched_only = st.toggle(
-            "Show Unmatched / Overridden Only",
-            value=False,
-            key=f"sym_filter_unmatched_{active_pid}_{btn_suffix}",
-        )
-    else:
-        unmatched_only = False
-
-    # Per-symptom mapping cards
-    for idx, sym in enumerate(mapped_list):
-        sid = sym["symptom_id"]
-        override_val = pstate["symptom_overrides"].get(sid, "Auto (Agent)")
-        is_unmatched = sym["primary_status"] == "UNMATCHED" and override_val == "Auto (Agent)"
-        if unmatched_only and not is_unmatched and override_val == "Auto (Agent)":
-            continue
-
-        if override_val == "Ruled Out (No Match)":
-            badge_html = '<span class="badge badge-red">Physician Ruled Out Drug Match</span>'
-        elif override_val == "Confirmed Match":
-            badge_html = '<span class="badge badge-green">Physician Confirmed Match</span>'
-        elif sym["primary_status"] == "MATCHED_ZIP_OUTBREAK":
-            badge_html = '<span class="badge badge-red">ZIP Outbreak Match</span>'
-        elif sym["primary_status"] == "MATCHED_DRUG_AE":
-            badge_html = '<span class="badge badge-amber">Drug / Adverse-Effect Match</span>'
-        elif sym["primary_status"] == "MATCHED_EHR":
-            badge_html = '<span class="badge badge-blue">Intrinsic EHR / Lab Match</span>'
-        else:
-            badge_html = '<span class="badge badge-red">Unmatched — Investigate Next Stage</span>'
-
-        ehr_html = "".join(
-            f'<div style="font-size:0.75rem;color:var(--text);margin-top:4px;">'
-            f'<span class="badge badge-blue" style="margin-right:5px;">EHR</span>'
-            f'<b>{esc(m["finding"])}</b> — {esc(m["rationale"])} '
-            f'<span class="badge-mono">{esc(m["citation"])}</span></div>'
-            for m in sym.get("ehr_matches", [])
-        )
-
-        drug_html = ""
-        if unlocked >= 3:
-            if sym.get("drug_matches") and override_val != "Ruled Out (No Match)":
-                drug_html = "".join(
-                    f'<div style="font-size:0.75rem;color:var(--text);margin-top:5px;">'
-                    f'<span class="badge badge-amber" style="margin-right:5px;">DRUG AE</span>'
-                    f'<b>{esc(m["medication"])}</b> [{esc(m["classification"])}] — {esc(m["rationale"])}</div>'
-                    for m in sym["drug_matches"]
-                )
-            else:
-                drug_html = (
-                    '<div style="font-size:0.74rem;color:var(--amber);margin-top:5px;">'
-                    'No matching adverse effect in active/stopped drugs (or ruled out by physician).'
-                    '</div>'
-                )
-
-        outbreak_html = ""
-        if unlocked >= 4 and sym.get("outbreak_matches"):
-            outbreak_html = "".join(
-                f'<div style="font-size:0.75rem;color:var(--text);margin-top:5px;">'
-                f'<span class="badge badge-red" style="margin-right:5px;">ZIP {esc(postal_code)}</span>'
-                f'<b>{esc(m["pathogen_or_factor"])}</b> — {esc(m["rationale"])}</div>'
-                for m in sym["outbreak_matches"]
-            )
-
-        body_html = (
-            (ehr_html or '<div style="font-size:0.74rem;color:var(--text-muted);">No chronic EHR condition match yet.</div>')
-            + drug_html
-            + outbreak_html
-        )
-
-        if compact_side_panel:
-            ev_counts = [f"{len(sym.get('ehr_matches', []))} EHR"]
-            if unlocked >= 3:
-                ev_counts.append(f"{len(sym.get('drug_matches', []))} Drug")
-            if unlocked >= 4:
-                ev_counts.append(f"{len(sym.get('outbreak_matches', []))} ZIP")
-            ov_tag = f" · Override: {esc(override_val)}" if override_val != "Auto (Agent)" else ""
-            render_html(
-                '<div class="epa-card" style="padding:0.7rem 0.85rem;margin-bottom:0.25rem;">'
-                '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;flex-wrap:wrap;">'
-                f'<div style="font-size:0.82rem;font-weight:700;color:var(--text);">{esc(sym["label"])}</div>'
-                f'{badge_html}'
-                '</div>'
-                '<div style="font-size:0.71rem;color:var(--text-muted);margin-top:3px;">'
-                f'{esc(sym["observed_value"])} · {" · ".join(ev_counts)}{ov_tag}'
-                '</div>'
-                '</div>'
-            )
-            with st.expander("Evidence & Override", expanded=is_unmatched):
-                render_html(body_html)
+    # Optional clean collapsed evidence drawer for citations (zero clutter by default)
+    if mapped_list:
+        with st.expander("🔍 Inspect Underlying Citations & Finding Rationales", expanded=False):
+            ev_rows = ""
+            for sym in mapped_list:
+                sources: list[str] = []
+                for m in sym.get("ehr_matches", [])[:1]:
+                    sources.append(f'<span class="badge badge-blue">EHR</span> {esc(m["finding"])} <span class="badge-mono">{esc(m["citation"])}</span>')
                 if unlocked >= 3:
-                    options_ov = ["Auto (Agent)", "Confirmed Match", "Ruled Out (No Match)"]
-                    new_ov = st.selectbox(
-                        f"Physician Validation — {sym['label']}",
-                        options=options_ov,
-                        index=options_ov.index(override_val),
-                        key=f"sym_ov_{active_pid}_{sid}_{idx}_{btn_suffix}",
-                    )
-                    if new_ov != override_val:
-                        pstate["symptom_overrides"][sid] = new_ov
-                        st.rerun()
-        else:
+                    for m in sym.get("drug_matches", [])[:1]:
+                        if m["medication"] not in ruled_out_meds:
+                            sources.append(f'<span class="badge badge-amber">DRUG</span> {esc(m["medication"])}')
+                if unlocked >= 4:
+                    for m in sym.get("outbreak_matches", [])[:1]:
+                        sources.append(f'<span class="badge badge-red">ZIP</span> {esc(m["pathogen_or_factor"])}')
+                src_html = "<br>".join(sources) or '<span style="color:var(--text-muted);">Unexplained at current stage</span>'
+                ev_rows += (
+                    f'<tr>'
+                    f'<td style="font-weight:600;">{esc(sym.get("short_label") or sym["label"])}<br>'
+                    f'<span class="badge-mono">{esc(sym["fhir_citation"])}</span></td>'
+                    f'<td style="font-size:0.75rem;">{src_html}</td>'
+                    f'</tr>'
+                )
             render_html(
-                '<div class="epa-card" style="padding:0.95rem 1.05rem;margin-bottom:0.55rem;">'
-                '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">'
-                '<div>'
-                f'<div style="font-size:0.84rem;font-weight:700;color:var(--text);">{esc(sym["label"])}</div>'
-                '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">'
-                f'{esc(sym["category"])} · {esc(sym["observed_value"])} · <span class="badge-mono">{esc(sym["fhir_citation"])}</span>'
-                '</div>'
-                '</div>'
-                f'{badge_html}'
-                '</div>'
-                f'<div style="margin-top:6px;">{body_html}</div>'
-                '</div>'
+                f"""
+                <div class="data-table-wrap" style="margin-bottom:0.1rem;">
+                    <table class="data-table">
+                        <thead><tr><th>Finding</th><th>Matched Evidence</th></tr></thead>
+                        <tbody>{ev_rows}</tbody>
+                    </table>
+                </div>
+                """
             )
-
-            options_ov = ["Auto (Agent)", "Confirmed Match", "Ruled Out (No Match)"]
-            new_ov = st.selectbox(
-                f"Physician Validation — {sym['label']}",
-                options=options_ov,
-                index=options_ov.index(override_val),
-                key=f"sym_ov_{active_pid}_{sid}_{idx}_{btn_suffix}",
-                label_visibility="collapsed",
-            )
-            if new_ov != override_val:
-                pstate["symptom_overrides"][sid] = new_ov
-                st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -985,7 +1237,7 @@ _VIEW_KEYS = ["roster", "workspace", "sym_matrix"]
 _VIEW_LABELS = {
     "roster": "1 · Emergency Ward Patient Roster",
     "workspace": f"2 · Guided Clinical Investigation ({demo.get('name', active_pid)})",
-    "sym_matrix": "3 · Dedicated Symptom Mapping Matrix UI",
+    "sym_matrix": "3 · Competing Hypotheses Scorecard",
 }
 active_view = st.radio(
     "Workspace View",
@@ -1837,64 +2089,205 @@ elif active_view == "workspace":
         render_symptom_mapping_ui(compact_side_panel=True)
 
 # ===========================================================================
-# VIEW 3: DEDICATED FULL-SCREEN SYMPTOM MAPPING MATRIX UI
+# VIEW 3: FULL-SCREEN COMPETING HYPOTHESES SCORECARD & COVERAGE GRID
 # ===========================================================================
 elif active_view == "sym_matrix":
+    unlocked_now = pstate["unlocked_stage"]
+    competing_full, ruled_out_full = _get_live_competing_hypotheses()
+    total_f = competing_full["total_findings"]
+    overall_exp = competing_full["overall_explained"]
+    cov_pct = competing_full["coverage_pct"]
+    drug_gaps_cnt = competing_full["drug_unexplained_count"]
+
     render_html(
         f"""
-        <div class="epa-card">
-            <div style="font-size:1.02rem;font-weight:700;color:var(--text);">
-                Dedicated Symptom-to-Etiology Matrix — {esc(demo.get('name'))} (<span class="badge-mono">{esc(active_pid)}</span>)
+        <div class="epa-card" style="padding:1.05rem 1.25rem;margin-bottom:0.75rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div>
+                    <div style="font-size:1.05rem;font-weight:700;color:var(--text);">
+                        Competing Hypotheses Scorecard — {esc(demo.get('name'))} (<span class="badge-mono">{esc(active_pid)}</span>)
+                    </div>
+                    <div style="font-size:0.79rem;color:var(--text-muted);margin-top:3px;">
+                        Side-by-side root-cause comparison across Chronic EHR Baseline, Medication/Adverse-Effect Pharmacology, and Hyperlocal 5-Digit ZIP ({esc(postal_code)}) Outbreaks.
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <span class="badge badge-blue">Diagnostic Coverage: {overall_exp}/{total_f} ({cov_pct}%)</span>
+                </div>
             </div>
-            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:3px;">
-                Cross-maps every presenting symptom, triage vital abnormality, and acute lab derangement across Longitudinal EHR Conditions, RxNorm/OpenFDA Drug Adverse Effects, and 5-Digit ZIP ({esc(postal_code)}) Outbreaks.
+            <div class="hyp-coverage-track">
+                <div class="hyp-coverage-fill" style="width:{max(4, cov_pct)}%;background:{'var(--green)' if overall_exp == total_f else '#2563eb'};"></div>
             </div>
         </div>
         """
     )
 
-    matrix_rows = ""
-    unlocked_now = pstate["unlocked_stage"]
-    for sym in symptom_map_data.get("mapped_symptoms", []):
-        ehr_cell = "<br>".join(f"• <b>{esc(m['finding'])}</b> ({esc(m['citation'])})" for m in sym.get("ehr_matches", [])) or "—"
+    # 3-Column Side-by-Side Competing Hypotheses Board
+    hc1, hc2, hc3 = st.columns(3)
+    for col_widget, hcard in zip((hc1, hc2, hc3), competing_full["hypotheses"]):
+        with col_widget:
+            render_html(build_hypothesis_card_html(hcard, rank_num=None))
+
+    # 1-Click Bedside Action Bar + Live ADK Verdict Trigger
+    bar_c1, bar_c2, bar_c3 = st.columns([1.2, 1.2, 1.4])
+    with bar_c1:
         if unlocked_now < 3:
-            drug_cell = '<span class="badge-mono">Locked until Step 3</span>'
+            if st.button(
+                "Audit Medications in Step 3 →",
+                key=f"full_jump_step3_{active_pid}",
+                type="primary",
+                width="stretch",
+            ):
+                pstate["unlocked_stage"] = max(unlocked_now, 3)
+                pstate["active_stage"] = 3
+                st.session_state.active_view = "workspace"
+                st.rerun()
         else:
+            if st.button(
+                "✓ Confirm Medication Etiology",
+                key=f"full_confirm_drug_{active_pid}",
+                type="primary" if drug_gaps_cnt == 0 else "secondary",
+                width="stretch",
+            ):
+                pstate["drug_gate_confirmed_match"] = True
+                pstate["drug_gate_confirmed_timestamp"] = datetime.now().strftime("%b %d, %Y %H:%M")
+                st.rerun()
+    with bar_c2:
+        if unlocked_now >= 3:
+            btn_zip_lbl = (
+                f"→ {drug_gaps_cnt} Drug Gap{'s' if drug_gaps_cnt != 1 else ''} · Unlock ZIP {postal_code}"
+                if unlocked_now == 3 and drug_gaps_cnt > 0
+                else (f"Unlock ZIP {postal_code} Outbreaks →" if unlocked_now == 3 else f"Open Step 4: ZIP {postal_code} Details →")
+            )
+            if st.button(
+                btn_zip_lbl,
+                key=f"full_unlock_zip_{active_pid}",
+                type="primary" if unlocked_now == 3 and drug_gaps_cnt > 0 else "secondary",
+                width="stretch",
+            ):
+                pstate["drug_gate_validated_no_match"] = True
+                if not pstate.get("drug_gate_timestamp"):
+                    pstate["drug_gate_timestamp"] = datetime.now().strftime("%b %d, %Y %H:%M")
+                pstate["unlocked_stage"] = 4
+                pstate["active_stage"] = 4
+                st.session_state.active_view = "workspace"
+                st.rerun()
+        else:
+            st.button(
+                f"🔒 ZIP {postal_code} Outbreaks (Complete Step 3 First)",
+                key=f"full_locked_zip_{active_pid}",
+                disabled=True,
+                width="stretch",
+            )
+    with bar_c3:
+        if st.button(
+            f"✦ Generate AI Clinical Verdict (Stage {unlocked_now})",
+            key=f"full_run_adk_{active_pid}_{unlocked_now}",
+            width="stretch",
+        ):
+            ctx_parts: list[str] = []
+            if ruled_out_full:
+                ctx_parts.append(f"Physician ruled out medications: {', '.join(sorted(ruled_out_full))}")
+            if pstate.get("drug_gate_note"):
+                ctx_parts.append(pstate["drug_gate_note"])
+            with st.spinner("Synthesizing concise Competing Hypotheses Verdict via Google ADK..."):
+                try:
+                    ai_md = run_adk_symptom_mapper(
+                        patient_id=active_pid,
+                        unlocked_stage=unlocked_now,
+                        physician_validation_note="; ".join(ctx_parts),
+                    )
+                    pstate["adk_ai_mapping_md"] = clean_agent_md(ai_md)
+                    pstate["adk_ai_stage"] = unlocked_now
+                except Exception as exc:
+                    pstate["adk_ai_mapping_md"] = (
+                        f"**ADK Agent Notice:** Could not reach Vertex AI (`{type(exc).__name__}`). "
+                        "Deterministic Competing Hypotheses Scorecard remains active above."
+                    )
+                    pstate["adk_ai_stage"] = unlocked_now
+
+    if pstate.get("adk_ai_mapping_md"):
+        with st.expander(
+            f"✦ AI Competing Hypotheses Verdict (Stage {pstate.get('adk_ai_stage', unlocked_now)})",
+            expanded=True,
+        ):
+            st.markdown(clean_agent_md(pstate["adk_ai_mapping_md"]))
+
+    # Compact At-a-Glance Finding-by-Hypothesis Checkmark Grid (2-second scan, zero paragraphs)
+    matrix_rows = ""
+    for sym in symptom_map_data.get("mapped_symptoms", []):
+        chip_lbl = sym.get("short_label") or sym["label"]
+        ehr_m = sym.get("ehr_matches", [])
+        eff_drug_m = [
+            m for m in (sym.get("drug_matches", []) if unlocked_now >= 3 else [])
+            if m["medication"] not in ruled_out_full
+        ]
+        out_m = sym.get("outbreak_matches", []) if unlocked_now >= 4 else []
+
+        if ehr_m:
+            ehr_cell = (
+                f'<span class="chip-explain" title="{esc(ehr_m[0]["rationale"] + " [" + ehr_m[0]["citation"] + "]")}">'
+                f'✓ {esc(_truncate_text(ehr_m[0]["finding"], 38))}</span>'
+            )
+        else:
+            ehr_cell = '<span style="color:var(--text-muted);">—</span>'
+
+        if unlocked_now < 3:
+            drug_cell = '<span class="badge-mono">Step 3</span>'
+        elif eff_drug_m:
             drug_cell = (
-                "<br>".join(f"• <b>{esc(m['medication'])}</b>: {esc(m['rationale'][:110])}" for m in sym.get("drug_matches", []))
-                or '<span class="badge badge-amber">No Drug Match</span>'
+                f'<span class="chip-explain" title="{esc(eff_drug_m[0]["rationale"])}">'
+                f'✓ {esc(_truncate_text(eff_drug_m[0]["medication"], 34))}</span>'
             )
-        if unlocked_now < 4:
-            zip_cell = '<span class="badge-mono">Locked until Step 3 Validated</span>'
         else:
+            drug_cell = '<span class="chip-gap">✗ No Drug Match</span>'
+
+        if unlocked_now < 4:
+            zip_cell = '<span class="badge-mono">Gated</span>'
+        elif out_m:
+            cls_z = "chip-resolved" if not eff_drug_m else "chip-explain"
+            pfx_z = "★" if not eff_drug_m else "✓"
             zip_cell = (
-                "<br>".join(f"• <b>{esc(m['pathogen_or_factor'])}</b>: {esc(m['rationale'])}" for m in sym.get("outbreak_matches", []))
-                or "—"
+                f'<span class="{cls_z}" title="{esc(out_m[0]["rationale"])}">'
+                f'{pfx_z} {esc(_truncate_text(out_m[0]["pathogen_or_factor"], 32))}</span>'
             )
-        ov_state = pstate["symptom_overrides"].get(sym["symptom_id"], "Auto (Agent)")
+        else:
+            zip_cell = '<span style="color:var(--text-muted);">—</span>'
+
+        explained_any = bool(ehr_m) or bool(eff_drug_m) or bool(out_m)
+        fit_pill = (
+            '<span class="badge badge-green">Explained</span>'
+            if explained_any
+            else '<span class="badge badge-red">Unexplained</span>'
+        )
+
         matrix_rows += (
             f'<tr>'
-            f'<td style="font-weight:600;">{esc(sym["label"])}<br><span class="badge-mono">{esc(sym["fhir_citation"])}</span></td>'
-            f'<td>{esc(sym["category"])}</td>'
+            f'<td style="font-weight:600;">{esc(chip_lbl)}'
+            f'<div style="font-size:0.71rem;font-weight:400;color:var(--text-muted);">{esc(sym["observed_value"])}</div></td>'
+            f'<td><span class="badge-mono">{esc(sym["category"].replace(" Abnormality", "").replace("Presenting ", ""))}</span></td>'
             f'<td>{ehr_cell}</td>'
             f'<td>{drug_cell}</td>'
             f'<td>{zip_cell}</td>'
-            f'<td><span class="badge badge-blue">{esc(ov_state)}</span></td>'
+            f'<td>{fit_pill}</td>'
             f'</tr>'
         )
 
     render_html(
         f"""
+        <div style="font-size:0.88rem;font-weight:700;color:var(--text);margin:0.65rem 0 0.4rem;">
+            At-a-Glance Finding Coverage Grid (Hover Any Pill for Clinical Rationale)
+        </div>
         <div class="data-table-wrap">
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>Symptom / Clinical Sign</th>
-                        <th>Source Type</th>
-                        <th>Stage 1–2: Longitudinal EHR Match</th>
-                        <th>Stage 3: Drug &amp; Adverse-Effect Match</th>
-                        <th>Stage 4: ZIP {esc(postal_code)} Outbreak Match</th>
-                        <th>Physician Status</th>
+                        <th>Clinical Finding</th>
+                        <th>Type</th>
+                        <th>Chronic EHR Baseline</th>
+                        <th>Medication / Adverse Effect</th>
+                        <th>ZIP {esc(postal_code)} Outbreak / AQI</th>
+                        <th>Coverage</th>
                     </tr>
                 </thead>
                 <tbody>{matrix_rows}</tbody>
@@ -1902,8 +2295,6 @@ elif active_view == "sym_matrix":
         </div>
         """
     )
-
-    render_symptom_mapping_ui(compact_side_panel=False)
 
 # ===========================================================================
 # PERSISTENT NON-DISRUPTIVE FOOTER: PUBLIC API & CLINICAL DATA REFERENCES

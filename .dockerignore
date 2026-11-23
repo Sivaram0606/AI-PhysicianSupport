@@ -23,4 +23,6 @@ __pycache__/
 # Local ADK & Pre-generated Outputs
 .adk/
 outputs/*.html
+outputs/*.mp4
+*.pptx
 temp.ipynb
