@@ -292,14 +292,14 @@
   <div class="stage-wrap">
 
     <!-- SLIDE 1: TITLE -->
-    <section class="slide active" data-notes="Opening Hook (45s): Emergency physicians face fragmented multi-year charts, hidden OTC brand-vs-generic duplicate dosing, and shifting neighborhood viral surges—all under severe time pressure. Dumping a 20-page LLM summary creates cognitive overload. We built Emergency Physician Assist on Google ADK, Vertex AI Gemini 3.8 Flash, and Google Cloud Healthcare FHIR R4 to mirror how an attending physician actually reasons—step by step—with a dedicated Symptom Mapping UI running alongside.">
+    <section class="slide active" data-notes="Opening Hook (45s): Emergency physicians face fragmented multi-year charts, hidden OTC brand-vs-generic duplicate dosing, and shifting neighborhood viral surges—all under severe time pressure. Dumping a 20-page LLM summary creates cognitive overload. We built Emergency Physician Assist on Google ADK, Vertex AI Gemini 3.8 Flash, and Google Cloud Healthcare FHIR R4 to mirror how an attending physician actually reasons—step by step—paired with a real-time Competing Hypotheses Scorecard.">
       <div>
         <div class="slide-kicker">Google ADK · Vertex AI (`gemini-3.8-flash`) · Cloud Healthcare HL7 FHIR R4 · Cloud Run</div>
         <h1>AI Physician Emergency Support</h1>
         <p class="lead">
           A progressive, physician-gated clinical decision-support workspace &amp; multi-agent system that unifies
           <b>Longitudinal FHIR Charts</b>, <b>4-Track Temporal Swimlanes</b>, <b>RxNorm / OpenFDA Drug Safety</b>,
-          <b>Hyperlocal 5-Digit ZIP Outbreak Surveillance</b>, and <b>Real-Time Symptom Mapping</b>.
+          <b>Hyperlocal 5-Digit ZIP Outbreak Surveillance</b>, and an <b>Agentic Competing Hypotheses Scorecard</b>.
         </p>
       </div>
 
@@ -310,9 +310,9 @@
           <p>Enforces physician-led clinical sequencing: Charts → Swimlane → Drug Audit &amp; Gate → Hyperlocal ZIP Outbreaks.</p>
         </div>
         <div class="card card-highlight-amber">
-          <span class="pill pill-amber">Separate Symptom UI</span>
-          <h3 style="margin-top:0.55rem;">ADK Symptom Mapper Agents</h3>
-          <p>Continuously maps bedside signs across <b>Intrinsic EHR</b>, <b>Drug Adverse Effects</b>, and <b>ZIP Pathogens</b>.</p>
+          <span class="pill pill-amber">Competing Hypotheses UI</span>
+          <h3 style="margin-top:0.55rem;">Syndrome-First ADK Scorecard</h3>
+          <p>Ranks <b>Medication AE</b>, <b>Chronic EHR</b> &amp; <b>ZIP Outbreak</b> hypotheses with <code>✓ Explains</code> / <code>✗ Cannot Explain</code> chips.</p>
         </div>
         <div class="card card-highlight-green">
           <span class="pill pill-green">Cloud-Native &amp; Hardened</span>
@@ -328,7 +328,7 @@
     </section>
 
     <!-- SLIDE 2: CLINICAL PROBLEM & SOLUTION -->
-    <section class="slide" data-notes="Explain why existing EHR AI summarizers fail in the ED: (1) They dump everything at once before the physician anchors on the baseline trajectory; (2) They miss brand-vs-generic duplicate ingredients like Tylenol + Acetaminophen; (3) They lack hyperlocal neighborhood outbreak context when drugs don't explain infectious symptoms.">
+    <section class="slide" data-notes="Explain why existing EHR AI summarizers fail in the ED: (1) They dump everything at once before the physician anchors on the baseline trajectory; (2) They miss brand-vs-generic duplicate ingredients like Tylenol + Acetaminophen; (3) Instead of auditing 10 isolated symptoms one-by-one, physicians need competing root-cause hypotheses showing what fits and what red flags remain unexplained.">
       <div class="slide-header">
         <div class="slide-kicker">The Clinical Challenge in the Emergency Ward</div>
         <h2>Why Progressive Gated Reasoning Beats Single-Turn Summarization</h2>
@@ -351,7 +351,7 @@
           <ul>
             <li><b>Stage-Gated Investigation:</b> Drug &amp; outbreak checks unlock in clinical order so attending physicians validate each hypothesis layer.</li>
             <li><b>Deterministic + Agentic Verification:</b> Combines live <b>NIH RxNorm</b>, <b>OpenFDA SPL/FAERS</b>, and <b>CDC ZCTA5/NSSP/NWSS</b> APIs with <b>Google ADK</b> synthesis.</li>
-            <li><b>Dedicated Symptom Mapping Panel:</b> Visually separates resolved vs. unexplained symptoms at every stage with bedside Confirm / Rule-Out controls.</li>
+            <li><b>Competing Hypotheses Scorecard:</b> Groups findings into 3 ranked Root-Cause Cards with <code>✓ Explains</code> / <code>✗ Cannot Explain</code> pills and 1-click bedside verdicts.</li>
           </ul>
         </div>
       </div>
@@ -363,10 +363,10 @@
     </section>
 
     <!-- SLIDE 3: 4-STEP WORKFLOW + SYMPTOM UI -->
-    <section class="slide" data-notes="Walk across the 4 columns from left to right. Emphasize the Physician Validation Gate between Step 3 and Step 4: the physician explicitly validates that medications do NOT match (or leave unexplained fever/hypoxia) before unlocking Step 4's 5-digit ZIP outbreak radar.">
+    <section class="slide" data-notes="Walk across the 4 columns from left to right. Emphasize how the Competing Hypotheses Scorecard mirrors bedside clinical thinking: instead of tedious per-symptom dropdowns, 3 ranked Root-Cause Cards show instant green/red pill coverage and a 1-click button on the Drug Hypothesis card to confirm medication toxicity or unlock Step 4's 5-digit ZIP outbreak radar.">
       <div class="slide-header">
         <div class="slide-kicker">Guided Clinical Investigation Flow</div>
-        <h2>4-Step Physician Workflow + Parallel Symptom Mapping UI</h2>
+        <h2>4-Step Physician Workflow + Competing Hypotheses Scorecard</h2>
       </div>
 
       <div class="step-flow">
@@ -393,11 +393,10 @@
       </div>
 
       <div class="card card-highlight-blue">
-        <h3>✦ Dedicated Symptom Mapping UI (Side-by-Side Panel + Full-Screen Matrix Tab)</h3>
+        <h3>✦ Competing Hypotheses Scorecard (Right Side Panel + Full-Screen 3-Column Tab)</h3>
         <p>
-          Powered by Google ADK's <code>symptom_mapping_pipeline</code> (<code>ParallelAgent</code> intake → <code>clinical_symptom_mapper_agent</code>).
-          Tracks every presenting sign across <b>Stage 1–2 (Intrinsic EHR)</b> → <b>Stage 3 (Drug AE Match / Unmatched)</b> → <b>Stage 4 (ZIP Outbreak Match)</b>,
-          with per-symptom bedside physician overrides (<code>Confirmed Match</code> / <code>Ruled Out</code>).
+          Powered by <code>build_competing_hypotheses</code> &amp; Google ADK's <code>symptom_mapping_pipeline</code> (<code>symptom_extractor_agent</code> → <code>clinical_symptom_mapper_agent</code>).
+          Replaces per-symptom dropdown clutter with a <b>Diagnostic Coverage Bar</b>, <b>3 Ranked Root-Cause Cards</b> (<code>✓ Explains</code> green chips, <code>✗ Cannot Explain</code> red gaps, <code>★ Resolves Drug Gap</code> highlights), <b>1-click bedside actions</b>, an <b>At-a-Glance Checkmark Grid</b>, and a concise 3-part <b>AI Clinical Verdict</b>.
         </p>
       </div>
 
@@ -408,7 +407,7 @@
     </section>
 
     <!-- SLIDE 4: MULTI-AGENT ARCHITECTURE -->
-    <section class="slide" data-notes="Highlight the Google ADK composition patterns used: Root LlmAgent orchestrator, SequentialAgent + ParallelAgent pipelines for both Chart Review and Symptom Mapping, and direct pooled Python tools connected to GCP Cloud Healthcare FHIR R4, RxNorm, OpenFDA, and CDC.">
+    <section class="slide" data-notes="Highlight the Google ADK composition patterns used: Root LlmAgent orchestrator, SequentialAgent + ParallelAgent pipelines for Chart Review and Competing-Hypotheses Symptom Mapping, and direct pooled Python tools connected to GCP Cloud Healthcare FHIR R4, RxNorm, OpenFDA, and CDC.">
       <div class="slide-header">
         <div class="slide-kicker">System &amp; Agent Topology</div>
         <h2>Google ADK Multi-Agent &amp; Live Clinical Data Architecture</h2>
@@ -420,7 +419,7 @@
           <h3 style="margin-top:0.5rem;">Google ADK Agents</h3>
           <ul>
             <li><b><code>ehr_chart_summary_agent</code></b>: Root 5-stage conversational ED clinical assistant.</li>
-            <li><b><code>symptom_mapping_pipeline</code></b>: <code>ParallelAgent</code> (extractor + harvester) → <code>clinical_symptom_mapper_agent</code>.</li>
+            <li><b><code>symptom_mapping_pipeline</code></b>: <code>SequentialAgent</code> (<code>symptom_extractor</code> → <code>clinical_symptom_mapper</code>) outputting a concise 3-part <b>Competing Hypotheses Verdict</b>.</li>
             <li><b><code>chart_review_pipeline</code></b>: 5-step <code>SequentialAgent</code> + 3-branch <code>ParallelAgent</code> 1-page brief builder.</li>
           </ul>
         </div>
@@ -523,7 +522,7 @@
     </section>
 
     <!-- SLIDE 6: LIVE DEMO ACT 1 & 2 (PAT-001 STEPS 1-2) -->
-    <section class="slide" data-notes="LIVE DEMO PART 1 (3 mins): Switch to the live browser tab! Show Tab 1 (Ward Roster), select pat-001 Alex Jordan Conn. On Step 1, point out PEF 54%, Eos 520, and ALT 22->58, plus the right-hand Symptom Panel showing Fever 100.2F still unmatched. Click Proceed to Step 2 and toggle Causal Connectors in the 4-Track Swimlane to show Lisinopril doubled on Oct 8.">
+    <section class="slide" data-notes="LIVE DEMO PART 1 (3 mins): Switch to the live browser tab! Show Tab 1 (Ward Roster), click Open pat-001 Alex Jordan Conn. On Step 1, point out PEF 54%, Eos 520, and ALT 22->58, plus the right-hand Competing Hypotheses Scorecard showing #1 Chronic EHR Baseline (9/10) with green ✓ chips and red ✗ Fever 100.2°F unexplained. Click Proceed to Step 2 and inspect the 4-Track Swimlane showing Lisinopril doubled on Oct 8.">
       <div class="slide-header">
         <div class="slide-kicker">Live Demo Walkthrough · Part 1 (`pat-001` Alex Jordan Conn)</div>
         <h2>Roster → Step 1 (Longitudinal Charts) → Step 2 (4-Track Swimlane)</h2>
@@ -534,9 +533,9 @@
           <span class="pill pill-blue">Click 1–2 · Ward Roster &amp; Step 1 Charts</span>
           <h3 style="margin-top:0.55rem;">Anchor on Longitudinal Trajectories</h3>
           <ul>
-            <li>Select <b><code>pat-001</code> Alex Jordan Conn</b> (48M, Boston <code>02118</code>, high-criticality <b>Sulfonamide allergy</b>).</li>
+            <li>Click <b><code>Open pat-001 · Alex Jordan Conn →</code></b> (48M, Boston <code>02118</code>, high-criticality <b>Sulfonamide allergy</b>).</li>
             <li><b>Plotly Lab Curves:</b> Spot <code>Peak Flow 88% → 54%</code>, <code>Eosinophils 280 → 520</code>, and subtle <code>ALT 22 → 58 U/L</code>.</li>
-            <li><b>Right-Hand Symptom Panel:</b> Wheezing maps to <b>Asthma (EHR)</b>, while <code>Fever 100.2°F</code> &amp; <code>ALT 58</code> await downstream audit.</li>
+            <li><b>Competing Hypotheses Scorecard:</b> Ranks <b>#1 Chronic EHR Baseline</b> (<code>9/10</code> green <code>✓</code> chips) while flagging <code>✗ Fever 100.2°F</code> as unexplained.</li>
           </ul>
         </div>
 
@@ -552,7 +551,7 @@
       </div>
 
       <div class="card" style="margin-top:0.4rem;">
-        <p><b>Presenter Tip:</b> Emphasize to the audience that Drugs (Step 3) and ZIP Outbreaks (Step 4) stayed intentionally locked until longitudinal history and temporal relationships were reviewed.</p>
+        <p><b>Presenter Tip:</b> Emphasize to the audience that Medication Etiology (Step 3) and ZIP Outbreaks (Step 4) appear as locked/gated hypothesis cards until baseline history and temporal relationships are reviewed.</p>
       </div>
 
       <div class="slide-footer">
@@ -562,30 +561,30 @@
     </section>
 
     <!-- SLIDE 7: LIVE DEMO ACT 3 & 4 (PAT-001 STEPS 3-4 + ADK AGENT) -->
-    <section class="slide" data-notes="LIVE DEMO PART 2 (4 mins): On Step 3, highlight the red DUPLICATE ACTIVE INGREDIENT SAFETY HAZARD banner catching brand Tylenol + leftover generic Acetaminophen! Then point out that neither Lisinopril nor Acetaminophen causes a 100.2F fever and SpO2 91% hypoxia. Click the Validation Gate button to unlock Step 4 (Boston 02118 Outbreaks), then click 'Run Live ADK Symptom Mapper Agent (Stage 4)' on Tab 3!">
+    <section class="slide" data-notes="LIVE DEMO PART 2 (4 mins): On Step 3, highlight the red DUPLICATE ACTIVE INGREDIENT SAFETY HAZARD banner catching brand Tylenol + leftover generic Acetaminophen! Point to #1 Medication Hypothesis Card on the right: Partial Fit 5/10—explains Cough & ALT 58, but CANNOT explain ✗ Fever 100.2°F, ✗ SpO2 91%, or ✗ PEF 54%. Click '→ 5 Gaps · Unlock ZIP 02118' right on the card, then open Tab 3 ('3 · Competing Hypotheses Scorecard') and click '✦ Generate AI Clinical Verdict (Stage 4)'!">
       <div class="slide-header">
         <div class="slide-kicker">Live Demo Walkthrough · Part 2 (`pat-001` Alex Jordan Conn)</div>
-        <h2>Step 3 (Drug Audit &amp; Gate) → Step 4 (ZIP `02118` Outbreaks &amp; ADK Synthesis)</h2>
+        <h2>Step 3 (Drug Audit &amp; Gate) → Step 4 (ZIP `02118` Outbreaks &amp; ADK Verdict)</h2>
       </div>
 
       <div class="grid-2">
         <div class="card card-highlight-amber">
-          <span class="pill pill-amber">Click 4–5 · Step 3 Drug Audit &amp; Validation Gate</span>
-          <h3 style="margin-top:0.55rem;">"Aha!" #1: Hidden Duplicate Ingredient</h3>
+          <span class="pill pill-amber">Click 4–5 · Step 3 Drug Audit &amp; 1-Click Scorecard Gate</span>
+          <h3 style="margin-top:0.55rem;">"Aha!" #1: Duplicate Drug + <code>Partial Fit · 5/10</code></h3>
           <ul>
-            <li><b>Red Safety Banner:</b> RxNorm catches active <b>BRAND Tylenol</b> + leftover <b>GENERIC Acetaminophen</b> → explains <code>ALT 58 U/L</code>!</li>
-            <li><b>OpenFDA SPL / FAERS:</b> Confirms <b>Lisinopril</b> bradykinin dry cough.</li>
-            <li><b>Validation Gate:</b> Drugs do <i>not</i> explain <code>Fever 100.2°F</code> &amp; acute hypoxia (<code>SpO2 91%</code>) → click <b><code>✓ Validate: Nothing Matches / Unexplained Symptoms → Check ZIP 02118 Outbreaks →</code></b>.</li>
+            <li><b>Red Safety Banner:</b> RxNorm catches active <b>BRAND Tylenol</b> + leftover <b>GENERIC Acetaminophen</b> → explains <code>✓ ALT 58 [H]</code>!</li>
+            <li><b>#1 Medication Hypothesis Card:</b> Shows <code>✓ Persistent Cough</code> (Lisinopril) &amp; <code>✓ ALT 58 [H]</code>, plus red gaps <code>✗ Fever 100.2°F</code> &amp; <code>✗ SpO2 91%</code>.</li>
+            <li><b>1-Click Bedside Action:</b> Click <b><code>→ 5 Gaps · Unlock ZIP 02118</code></b> directly on the scorecard (or Step 3 Validation Gate).</li>
           </ul>
         </div>
 
         <div class="card card-highlight-red">
-          <span class="pill pill-red">Click 6–7 · Step 4 ZIP `02118` &amp; Live ADK Mapper</span>
-          <h3 style="margin-top:0.55rem;">"Aha!" #2: Hyperlocal Outbreak + 3-Way Split</h3>
+          <span class="pill pill-red">Click 6–7 · Step 4 ZIP `02118` &amp; Tab 3 Scorecard Board</span>
+          <h3 style="margin-top:0.55rem;">"Aha!" #2: <code>★ Resolves 5 Drug Gaps</code> + AI Verdict</h3>
           <ul>
-            <li>Queries <b>strictly Boston ZIP <code>02118</code></b> across CDC NSSP ED trajectories, CDC NWSS Sewershed PCR, CDC PLACES ZCTA5 &amp; Open-Meteo AQI.</li>
-            <li>Click <b><code>✦ Run Live ADK Symptom Mapper Agent (Stage 4)</code></b> in the Symptom Matrix tab.</li>
-            <li>ADK synthesizes the 3-part etiology: <b>Asthma flare (EHR)</b> + <b>Acetaminophen/Lisinopril (Drug AE)</b> + <b>Viral Respiratory Trigger (ZIP <code>02118</code>)</b>.</li>
+            <li><b>#1 ZIP <code>02118</code> Outbreak Card:</b> Jumps to rank #1 (<code>Resolves 5 Drug Gaps · 8/10</code>), highlighting <code>★ Fever 100.2°F</code> &amp; <code>★ SpO2 91%</code> against local Influenza/RSV surges.</li>
+            <li>Open Tab <b><code>3 · Competing Hypotheses Scorecard</code></b> for the 3-column comparison board + compact <b>Checkmark Grid</b>.</li>
+            <li>Click <b><code>✦ Generate AI Clinical Verdict (Stage 4)</code></b> for a crisp 3-part ADK synthesis (<i>Leading Fit, Gaps, Next Action</i>).</li>
           </ul>
         </div>
       </div>
@@ -597,7 +596,7 @@
     </section>
 
     <!-- SLIDE 8: FAST CONTRAST SCENARIOS -->
-    <section class="slide" data-notes="Use either of these 60-second contrast cases during Q&A or to show breadth: pat-002 proves the workflow stops cleanly at Step 3 when a drug interaction (Clarithromycin + Lipitor rhabdomyolysis) 100% explains the symptoms; pat-005 shows heart failure medication adherence barriers and renal recovery unlocking held GDMT.">
+    <section class="slide" data-notes="Use either of these 60-second contrast cases during Q&A or to show breadth: pat-002 proves the Competing Hypotheses Scorecard lights up green ('Explains All 5/5') at Step 3 when Clarithromycin + Lipitor rhabdomyolysis 100% explains the presentation; pat-005 shows heart failure medication adherence barriers and renal recovery unlocking held GDMT.">
       <div class="slide-header">
         <div class="slide-kicker">90-Second Contrast Scenarios</div>
         <h2>Showing Clinical Breadth: Pure Drug Toxicity vs. Complex Care Gaps</h2>
@@ -606,11 +605,11 @@
       <div class="grid-2">
         <div class="card card-highlight-amber">
           <span class="pill pill-amber">Contrast A · <code>pat-002</code> Maria Elena Reynolds</span>
-          <h3 style="margin-top:0.55rem;">CYP3A4 Drug Interaction Resolved at Step 3</h3>
+          <h3 style="margin-top:0.55rem;"><code>Explains All 5/5</code> Drug Match Resolved at Step 3</h3>
           <ul>
             <li><b>Presenting Signs:</b> Proximal muscle weakness, dark urine, <code>CK 110 → 4,850 U/L</code>, acute kidney injury (<code>Cr 1.92</code>).</li>
-            <li><b>Step 2 &amp; 3 Discovery:</b> Outside Urgent Care prescribed <b>Clarithromycin</b> without holding brand <b>Lipitor 80mg</b> → severe statin rhabdomyolysis.</li>
-            <li><b>Workflow Payoff:</b> Physician clicks <b><code>Log Confirmed Drug Adverse-Effect Match Only</code></b>—no unnecessary Step 4 infectious chase!</li>
+            <li><b>Scorecard Payoff:</b> #1 Medication Card (<b>Lipitor + Clarithromycin + Metformin</b>) shows <b><code>Explains All 5/5 (100%)</code></b> with zero unexplained gaps.</li>
+            <li><b>1-Click Stop:</b> Physician clicks <b><code>✓ Confirm Drug Cause (100% Fit)</code></b>—no unnecessary Step 4 infectious chase!</li>
           </ul>
         </div>
 

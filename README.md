@@ -15,7 +15,7 @@ Designed for attending Emergency Department (ED) and clinic physicians, **`ehr_c
      - **Step 2 — Interactive 4-Track Clinical Swimlane Chart**: Offline CSP-sandboxed HTML/SVG 4-track temporal timeline + synchronized cross-track causal matrix.
      - **Step 3 — Drugs Used & Adverse Effects + Duplicate Ingredient Alert + Physician Validation Gate**: Single-call parallel NIH RxNorm Generic vs. Brand + OpenFDA SPL/FAERS regimen audit (`audit_patient_medications_rxnorm_openfda`), deterministic **Duplicate Active Ingredient Safety Hazard** detection across active and leftover stopped/held prescriptions, and an explicit **Physician Validation Gate** before unlocking Step 4.
      - **Step 4 — 5-Digit ZIP-Code Outbreak & Infection Surveillance**: Unlocked after Step 3 physician validation; queries CDC NSSP Local ED trajectories, CDC NWSS Sewershed Wastewater PCR pathogens, CDC PLACES ZCTA5 prevalence, and Open-Meteo hyperlocal air quality in parallel.
-   - **Separate Symptom Mapping UI + Google ADK Symptom Agents**: Displays progressive symptom-to-etiology mapping **separately in the UI** — both in a dedicated side-by-side right panel during Steps 1–4 and in a dedicated full-screen **Symptom Mapping Matrix** tab, powered by `symptom_mapping_pipeline` (`ParallelAgent` intake $\rightarrow$ `clinical_symptom_mapper_agent`) with bedside physician Confirm/Rule-Out overrides.
+   - **Competing Hypotheses Scorecard UI + Google ADK Symptom Agents**: Groups presenting symptoms, abnormal vitals, and acute lab derangements into **3 ranked Root-Cause Hypothesis Cards** (*Medication / Adverse Effects*, *Chronic EHR Baseline*, and *Hyperlocal ZIP Outbreak*) with `✓ Explains` / `✗ Cannot Explain` / `★ Resolves Drug Gap` chips, **1-click bedside verdicts**, a dedicated **3-Column Competing Hypotheses Scorecard & Checkmark Grid** tab, and a concise 3-part **AI Clinical Verdict** powered by `symptom_mapping_pipeline`.
 2. **Conversational Multi-Agent ADK Workflow (`adk web` / `adk run`)**:
    - **Stage 1 (Greeting & Ward Roster)**: Introduces agent capabilities and pulls the live Emergency Ward patient roster (`pat-001` – `pat-007`) from FHIR with chief complaints and residential ZIP codes.
    - **Stage 2 (Select Patient — 1st Go: Triage + Longitudinal Labs, Imaging, Hospitalization Notes & Open Loops)**: Retrieves the patient's FHIR triage vitals, intake note, allergies, active problem list, multi-date lab trajectories (`Baseline -> Peak -> Latest`), diagnostic imaging (`CT`, `TTE Echo`, `CXR`), hospitalization/consult notes, and unresolved open clinical loops (`Flag`).
@@ -33,12 +33,10 @@ graph TD
     Physician["Attending ED / Clinic Physician"] --> UI["physician_assist_app.py\n(Emergency Physician Assist UI)"]
     Physician --> Root["ehr_chart_summary_agent (Root LlmAgent)"]
 
-    UI -->|"Dedicated Separate Symptom UI"| SymPipe["symptom_mapping_pipeline (SequentialAgent)"]
+    UI -->|"Competing Hypotheses Scorecard UI"| SymPipe["symptom_mapping_pipeline (SequentialAgent)"]
     Root -->|"Symptom Mapping Delegation"| SymPipe
-    SymPipe --> SymPar["1. parallel_symptom_intake (ParallelAgent)"]
-    SymPar --> SymExt["symptom_extractor_agent\n(FHIR Triage + Vital + Acute Lab Signs)"]
-    SymPar --> SymCtx["symptom_context_harvester_agent\n(Concurrent EHR / Drug / ZIP Context)"]
-    SymExt & SymCtx --> SymMap["2. clinical_symptom_mapper_agent (LlmAgent)\n(Progressive EHR -> Drug AE -> ZIP Outbreak Mapping)"]
+    SymPipe --> SymExt["1. symptom_extractor_agent (LlmAgent)\n(FHIR Triage + Vital + Acute Lab Signs)"]
+    SymExt --> SymMap["2. clinical_symptom_mapper_agent (LlmAgent)\n(3-Part Competing Hypotheses Verdict)"]
 
     Root -->|"Stage 1: Greeting / Roster"| WardList["list_emergency_ward_patients()\n(Concurrent FHIR Patient + Triage Encounter)"]
     Root -->|"Stage 2: Select Patient (1st Go)"| Compartments["Triage + Longitudinal Labs & Imaging +\nHospitalization Notes + Open Loops\n(Single-Flight FHIR $everything Lock)"]
