@@ -38,7 +38,7 @@ if command -v python3 >/dev/null 2>&1; then
     --project="${PROJECT_ID}" \
     --location="${FHIR_LOCATION}" \
     --dataset="${FHIR_DATASET}" \
-    --fhir-store="${FHIR_STORE}"
+    --fhir-store="${FHIR_STORE}" || echo "WARNING: FHIR store seeding skipped (operator Healthcare IAM restricted or store already seeded); continuing Cloud Run deploy."
 else
   echo "WARNING: python3 not found; skipping automatic FHIR seeding."
 fi
