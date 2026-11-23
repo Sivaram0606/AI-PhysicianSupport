@@ -24,6 +24,7 @@ try:
         build_mermaid_swimlane,
         extract_swimlane_from_fhir_bundle,
         generate_interactive_swimlane_html,
+        render_interactive_swimlane_html,
     )
 except ImportError:
     from fhir_cohort_data import PATIENT_ID_ALIASES, RAW_COHORT_SPECS, build_fallback_bundles  # type: ignore
@@ -33,6 +34,7 @@ except ImportError:
         build_mermaid_swimlane,
         extract_swimlane_from_fhir_bundle,
         generate_interactive_swimlane_html,
+        render_interactive_swimlane_html,
     )
 
 logger = logging.getLogger(__name__)
@@ -621,6 +623,45 @@ def get_open_loops_and_care_gaps(patient_id: str) -> dict[str, Any]:
     }
 
 
+def _build_swimlane_payload(patient_id: str, write_html: bool = True) -> dict[str, Any]:
+    pid, bundle, data_source = _fetch_fhir_everything_bundle(patient_id)
+    if not bundle:
+        return {"status": "error", "message": f"Patient '{patient_id}' not found in FHIR store."}
+
+    selected_swimlane = extract_swimlane_from_fhir_bundle(bundle)
+
+    # Populate ward tabs in the interactive HTML viewer across all FHIR cohort patients
+    all_swimlanes: dict[str, dict[str, Any]] = {pid: selected_swimlane}
+    for ward_pid, fb_bundle in FALLBACK_BUNDLES.items():
+        if ward_pid not in all_swimlanes:
+            all_swimlanes[ward_pid] = extract_swimlane_from_fhir_bundle(fb_bundle)
+    all_swimlanes = dict(sorted(all_swimlanes.items(), key=lambda kv: kv[0]))
+
+    payload: dict[str, Any] = {
+        "status": "success",
+        "patient_id": pid,
+        "patient_name": selected_swimlane["patient_name"],
+        "fhir_data_source": data_source,
+        "headline": selected_swimlane["headline"],
+        "tracks": SWIMLANE_TRACKS,
+        "synchronized_timepoints": selected_swimlane["timepoints"],
+        "causal_links": selected_swimlane["causal_links"],
+        "mermaid_swimlane": build_mermaid_swimlane(selected_swimlane),
+        "markdown_swimlane_matrix": build_markdown_swimlane_matrix(selected_swimlane),
+        "citations": [
+            {
+                "source_name": data_source,
+                "fhir_resource": f"Patient/{pid} ($everything 4-Track Temporal Synthesis)",
+            }
+        ],
+    }
+    if write_html:
+        payload["interactive_html_path"] = generate_interactive_swimlane_html(pid, all_swimlanes)
+    else:
+        payload["html_content"] = render_interactive_swimlane_html(pid, all_swimlanes)
+    return payload
+
+
 def generate_clinical_swimlane_graph(patient_id: str) -> dict[str, Any]:
     """
     Generates an Interactive Multi-Track Clinical Swimlane Graph directly from the patient's
@@ -638,36 +679,9 @@ def generate_clinical_swimlane_graph(patient_id: str) -> dict[str, Any]:
         Dictionary containing the Mermaid swimlane diagram, Markdown 4-track horizontal matrix,
         cross-track causal links, path to the interactive HTML/SVG viewer, and FHIR citations.
     """
-    pid, bundle, data_source = _fetch_fhir_everything_bundle(patient_id)
-    if not bundle:
-        return {"status": "error", "message": f"Patient '{patient_id}' not found in FHIR store."}
+    return _build_swimlane_payload(patient_id, write_html=True)
 
-    selected_swimlane = extract_swimlane_from_fhir_bundle(bundle)
 
-    # Populate ward tabs in the interactive HTML viewer across all FHIR cohort patients
-    all_swimlanes: dict[str, dict[str, Any]] = {pid: selected_swimlane}
-    for ward_pid, fb_bundle in FALLBACK_BUNDLES.items():
-        if ward_pid not in all_swimlanes:
-            all_swimlanes[ward_pid] = extract_swimlane_from_fhir_bundle(fb_bundle)
-    all_swimlanes = dict(sorted(all_swimlanes.items(), key=lambda kv: kv[0]))
-
-    html_path = generate_interactive_swimlane_html(pid, all_swimlanes)
-    return {
-        "status": "success",
-        "patient_id": pid,
-        "patient_name": selected_swimlane["patient_name"],
-        "fhir_data_source": data_source,
-        "headline": selected_swimlane["headline"],
-        "tracks": SWIMLANE_TRACKS,
-        "synchronized_timepoints": selected_swimlane["timepoints"],
-        "causal_links": selected_swimlane["causal_links"],
-        "mermaid_swimlane": build_mermaid_swimlane(selected_swimlane),
-        "markdown_swimlane_matrix": build_markdown_swimlane_matrix(selected_swimlane),
-        "interactive_html_path": html_path,
-        "citations": [
-            {
-                "source_name": data_source,
-                "fhir_resource": f"Patient/{pid} ($everything 4-Track Temporal Synthesis)",
-            }
-        ],
-    }
+def generate_clinical_swimlane_in_memory(patient_id: str) -> dict[str, Any]:
+    """UI helper that renders the interactive swimlane HTML directly in memory with zero disk I/O."""
+    return _build_swimlane_payload(patient_id, write_html=False)

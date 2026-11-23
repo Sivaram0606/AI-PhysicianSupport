@@ -16,7 +16,7 @@ from ...clinical_tools import (
     check_drug_brand_or_generic,
 )
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 drug_brand_checker_agent = LlmAgent(
     name="drug_brand_checker_agent",

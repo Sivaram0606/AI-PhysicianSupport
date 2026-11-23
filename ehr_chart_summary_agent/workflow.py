@@ -37,7 +37,7 @@ from .ehr_chart_tools import (
     get_patient_demographics_and_triage,
 )
 
-load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.8-flash")
 
 fhir_intake_node = LlmAgent(

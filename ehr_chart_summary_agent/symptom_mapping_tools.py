@@ -15,7 +15,6 @@ Supports the dedicated Symptom Mapping Assistant UI and Google ADK Sub-Agents by
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 import re
 from typing import Any
 
@@ -47,8 +46,8 @@ except ImportError:
     )
 
 
-@lru_cache(maxsize=32)
 def _cached_ehr_core(pid: str) -> dict[str, Any]:
+    """Fetches EHR core compartments concurrently (backed by 90s single-flight TTL cache in ehr_chart_tools)."""
     with ThreadPoolExecutor(max_workers=3) as pool:
         f_intake = pool.submit(get_patient_demographics_and_triage, pid)
         f_labs = pool.submit(get_longitudinal_labs_and_imaging, pid)
@@ -60,18 +59,18 @@ def _cached_ehr_core(pid: str) -> dict[str, Any]:
         }
 
 
-@lru_cache(maxsize=32)
 def _cached_med_history(pid: str) -> dict[str, Any]:
+    """Fetches FHIR medication history (backed by 90s single-flight TTL cache in ehr_chart_tools)."""
     return get_medication_reconciliation_history(pid)
 
 
-@lru_cache(maxsize=128)
 def _cached_drug_check(med_name: str, rxcui: str) -> dict[str, Any]:
+    """Queries RxNorm/OpenFDA (backed by 600s TTL cache in clinical_tools; transient errors are never cached)."""
     return check_drug_brand_or_generic(med_name, rxcui)
 
 
-@lru_cache(maxsize=32)
 def _cached_outbreak_check(postal_code: str, city: str) -> dict[str, Any]:
+    """Queries ZIP outbreak surveillance (backed by 300s TTL cache in clinical_tools)."""
     return get_location_outbreak_and_disease_data(postal_code=postal_code, city=city)
 
 

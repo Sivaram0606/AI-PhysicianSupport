@@ -35,7 +35,7 @@ for _env_candidate in (
     Path(__file__).resolve().parent / ".env",
 ):
     if _env_candidate.exists():
-        load_dotenv(_env_candidate, override=True)
+        load_dotenv(_env_candidate, override=False)
         break
 
 from ehr_chart_summary_agent.clinical_tools import (
@@ -45,10 +45,9 @@ from ehr_chart_summary_agent.clinical_tools import (
     list_emergency_ward_patients,
 )
 from ehr_chart_summary_agent.ehr_chart_tools import (
-    generate_clinical_swimlane_graph,
+    generate_clinical_swimlane_in_memory,
     get_hospitalizations_and_clinical_notes,
     get_longitudinal_labs_and_imaging,
-    get_medication_reconciliation_history,
     get_open_loops_and_care_gaps,
     get_patient_demographics_and_triage,
 )
@@ -188,23 +187,30 @@ def cached_longitudinal_bundle(patient_id: str) -> dict[str, Any]:
 
 @st.cache_data(ttl=180, show_spinner=False)
 def cached_swimlane(patient_id: str) -> dict[str, Any]:
-    res = generate_clinical_swimlane_graph(patient_id)
-    html_content = ""
-    html_path = res.get("interactive_html_path", "")
-    if html_path and Path(html_path).exists():
-        html_content = Path(html_path).read_text(encoding="utf-8")
-    return {**res, "html_content": html_content}
+    return generate_clinical_swimlane_in_memory(patient_id)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_drug_audit(patient_id: str) -> dict[str, Any]:
-    med_hist = get_medication_reconciliation_history(patient_id)
     batch = audit_patient_medications_rxnorm_openfda(patient_id)
+    active_audited = batch.get("active_prescriptions_audited", [])
+    held_audited = batch.get("held_or_discontinued_medications_audited", [])
     rx_by_name: dict[str, dict[str, Any]] = {}
-    for m in batch.get("active_prescriptions_audited", []):
+    for m in active_audited:
         rx_by_name[m["medication"]] = m.get("rxnorm_and_openfda_audit", {})
-    for h in batch.get("held_or_discontinued_medications_audited", []):
+    for h in held_audited:
         rx_by_name[h["medication"]] = h.get("rxnorm_and_openfda_audit", {})
+    med_hist = {
+        "status": batch.get("status", "success"),
+        "patient_id": batch.get("patient_id", patient_id),
+        "patient_name": batch.get("patient_name", patient_id),
+        "fhir_data_source": batch.get("fhir_data_source", ""),
+        "medications": {
+            "active_prescriptions": active_audited,
+            "held_or_discontinued_medications": held_audited,
+        },
+        "citations": batch.get("fhir_citations", []),
+    }
     return {
         "med_hist": med_hist,
         "rx_by_name": rx_by_name,
@@ -1211,13 +1217,27 @@ elif active_view == "workspace":
             v1, v2, v3, v4 = st.columns(4)
             with v1:
                 bp_str = str(vitals.get("bp", "—"))
-                metric_card("Blood Pressure", bp_str, "Triage Vital", "down" if "15" in bp_str or "16" in bp_str or "98/" in bp_str else "info")
+                bp_m = re.match(r"\s*(\d+)\s*/\s*(\d+)", bp_str)
+                bp_status = "info"
+                if bp_m:
+                    sbp, dbp = int(bp_m.group(1)), int(bp_m.group(2))
+                    if sbp >= 150 or dbp >= 95 or sbp < 100:
+                        bp_status = "down"
+                    elif sbp >= 135 or dbp >= 85:
+                        bp_status = "warn"
+                metric_card("Blood Pressure", bp_str, "Triage Vital", bp_status)
             with v2:
                 hr_str = str(vitals.get("hr", "—"))
-                metric_card("Heart Rate", hr_str, "Triage Vital", "warn" if "10" in hr_str or "11" in hr_str else "up")
+                hr_m = re.search(r"(\d+(?:\.\d+)?)", hr_str)
+                hr_val = float(hr_m.group(1)) if hr_m else None
+                hr_status = "down" if (hr_val is not None and (hr_val >= 110 or hr_val < 50)) else ("warn" if (hr_val is not None and (hr_val > 100 or hr_val < 55)) else "up")
+                metric_card("Heart Rate", hr_str, "Triage Vital", hr_status)
             with v3:
                 spo2_str = str(vitals.get("spo2", "—"))
-                metric_card("SpO2 Saturation", spo2_str, "Room Air", "down" if "91" in spo2_str or "92" in spo2_str else "up")
+                spo2_m = re.search(r"(\d+(?:\.\d+)?)", spo2_str)
+                spo2_val = float(spo2_m.group(1)) if spo2_m else None
+                spo2_status = "down" if (spo2_val is not None and spo2_val < 94) else ("warn" if (spo2_val is not None and spo2_val < 96) else "up")
+                metric_card("SpO2 Saturation", spo2_str, "Room Air", spo2_status)
             with v4:
                 temp_or_wt = vitals.get("temp") or f"{vitals.get('weight_lbs', '—')} lbs"
                 metric_card("Temp / Weight", str(temp_or_wt), f"Wt: {vitals.get('weight_lbs', '—')} lbs", "warn")
@@ -1421,7 +1441,7 @@ elif active_view == "workspace":
                             f"<td>"
                             f"<span class='badge {b_cls}'>{esc(cell.get('badge', 'EVENT'))}</span>"
                             f"<div style='font-weight:600;margin-top:4px;'>{esc(cell.get('title', '—'))}</div>"
-                            f"<div style='font-size:0.75rem;color:var(--text-muted);margin-top:2px;'>{esc(cell.get('detail', ''))}</div>"
+                            f"<div style='font-size:0.75rem;color:var(--text-muted);margin-top:2px;'>{esc(cell.get('summary') or cell.get('details') or cell.get('detail', ''))}</div>"
                             f"</td>"
                         )
                     tr_rows += f"<tr><td style='font-weight:700;'>{esc(trk['label'])}<br><span style='font-size:0.72rem;font-weight:400;color:var(--text-muted);'>{esc(trk['subtitle'])}</span></td>{cells}</tr>"

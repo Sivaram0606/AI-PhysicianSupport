@@ -14,7 +14,7 @@ from google.adk.agents import LlmAgent
 
 from ...ehr_chart_tools import get_medication_reconciliation_history
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 
 def get_medication_details(patient_id: str) -> dict[str, Any]:

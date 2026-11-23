@@ -39,7 +39,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 if load_dotenv is not None:
-    load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
 import re
 from urllib.parse import quote
