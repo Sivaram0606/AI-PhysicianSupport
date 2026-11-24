@@ -46,9 +46,9 @@ graph LR
 | File | Purpose |
 | :--- | :--- |
 | [`Dockerfile`](Dockerfile) | Multi-layer `python:3.13-slim` image running as non-root `appuser` (`uid 10001`), exposing `$PORT` (`8080`), `/_stcore/health` healthcheck, and `APP_MODE` toggle (`ui` vs `adk_web`). |
-| [`.dockerignore`](.dockerignore) | Excludes `.venv/`, `.git/`, `__pycache__/`, and local `.env` files so secrets never enter the Cloud Build context. |
-| [`deploy_cloud_run.sh`](deploy_cloud_run.sh) | Automated one-command script that enables APIs, provisions the least-privilege service account, deploys to Cloud Run with `--session-affinity` and `--iap`, and binds IAP/Invoker IAM roles. |
-| [`ehr_chart_summary_agent/swimlane_graph.py`](ehr_chart_summary_agent/swimlane_graph.py) | Supports `SWIMLANE_OUTPUT_DIR` and falls back automatically to `/tmp/swimlane_outputs` if container directories are mounted read-only. |
+| [`.dockerignore`](.dockerignore) | Excludes `.venv/`, `.git/`, `__pycache__/`, local `.env` secrets, demo videos (`*.mp4`), and slide decks (`*.pptx`, `DEMO_SLIDES.html`) so secrets never enter and builds stay fast. |
+| [`deploy_cloud_run.sh`](deploy_cloud_run.sh) | Automated one-command script that enables APIs, seeds the FHIR R4 store (gracefully skipping if Healthcare IAM is restricted or already seeded), provisions the least-privilege service account (with default Compute Engine SA fallback), deploys to Cloud Run with `--session-affinity` and `--iap`, and binds IAP/Invoker IAM roles. |
+| [`ehr_chart_summary_agent/swimlane_graph.py`](ehr_chart_summary_agent/swimlane_graph.py) | Renders interactive Swimlane HTML directly in memory for the Streamlit UI (`render_interactive_swimlane_html`, zero disk I/O) and writes atomically (`os.replace`) with `/tmp/swimlane_outputs` fallback for CLI/ADK callers. |
 | [`ehr_chart_summary_agent/seed_fhir_store.py`](ehr_chart_summary_agent/seed_fhir_store.py) | Creates and populates the Cloud Healthcare dataset and FHIR R4 store (`pat-001` – `pat-007`). |
 
 ---
@@ -95,6 +95,18 @@ FHIR_DATASET_ID="test" \
 FHIR_STORE_ID="synthe_data" \
 MODEL_NAME="gemini-3.8-flash" \
 ./deploy_cloud_run.sh
+```
+
+### Fast Code-Only Redeploy (Service Already Provisioned)
+
+Once APIs, FHIR store, service account, and IAP bindings are already set up, you can roll out code changes directly without re-running the full script:
+
+```bash
+gcloud run deploy emergency-physician-assist \
+  --source=. \
+  --project="your-gcp-project-id" \
+  --region=us-central1 \
+  --quiet
 ```
 
 ---
