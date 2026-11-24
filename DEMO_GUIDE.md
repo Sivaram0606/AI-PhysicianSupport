@@ -2,7 +2,7 @@
 
 This document provides a **complete live demonstration script, click-by-click walkthrough, and presenter talk track** for showcasing the **Emergency Physician Assist UI** ([`physician_assist_app.py`](physician_assist_app.py)) and **Google ADK Multi-Agent Clinical Pipelines** ([`ehr_chart_summary_agent`](ehr_chart_summary_agent/agent.py)).
 
-> **Companion Slide Deck**: Open [`DEMO_SLIDES.html`](DEMO_SLIDES.html) in any browser for a 10-slide interactive presentation deck (`←` / `→` keys to navigate, `N` to toggle Speaker Notes, `F` for Fullscreen, `Cmd/Ctrl + P` to export to PDF).
+> **Companion Slide Decks**: Open [`DEMO_SLIDES.html`](DEMO_SLIDES.html) in any browser for a 10-slide interactive presentation deck (`←` / `→` keys to navigate, `N` to toggle Speaker Notes, `F` for Fullscreen, `Cmd/Ctrl + P` to export to PDF). Editable PowerPoint decks are also available in [`DEMO_SLIDES.pptx`](DEMO_SLIDES.pptx) and [`AGENTIC_ARCHITECTURE_AND_FUNCTIONALITY.pptx`](AGENTIC_ARCHITECTURE_AND_FUNCTIONALITY.pptx).
 
 ---
 
@@ -27,7 +27,7 @@ Choose either the **Cloud Run URL** or **Local Streamlit**:
   2. *(Optional warm-up)* Click once on the ward roster 30 seconds before presenting so the container is warm.
 - **Local Backup (Zero-Dependency Fallback)**:
   ```bash
-  .venv/bin/streamlit run physician_assist_app.py
+  ehr_chart_summary_agent/.venv/bin/streamlit run physician_assist_app.py
   ```
   Open **`http://localhost:8501`**.
 
@@ -75,7 +75,7 @@ Choose either the **Cloud Run URL** or **Local Streamlit**:
      - **Track 2**: Medication Changes & Real-World Adherence
      - **Track 3**: Longitudinal Labs, Vitals & Imaging
      - **Track 4**: Open Clinical Loops & Safety Alerts
-   - Toggle **`Causal Connectors: ON`** / **`Highlight Critical / Warning Only`** inside the interactive viewer to highlight the temporal link: **Lisinopril dose doubled (`5 mg -> 10 mg`) on Oct 8** $\rightarrow$ preceded the non-productive cough!
+   - Toggle **`Causal Connectors: ON`** / **`Highlight Critical / Warning Only`** inside the interactive viewer to highlight the temporal link: **Lisinopril dose doubled (`5 mg -> 10 mg`)** shortly before the non-productive cough began!
 2. **Action**: Click **`Swimlane Reviewed → Initiate Step 3: Check Drugs & Adverse Effects for Alex Jordan Conn →`**.
 
 ---
@@ -136,7 +136,7 @@ If the audience asks *"What happens when drugs DO 100% explain the presentation?
 
 ## 5. Bonus Track — Conversational ADK Web Demo (`adk web`)
 
-If demonstrating conversational multi-agent orchestration for technical/AI audiences (`.venv/bin/adk web` on `http://127.0.0.1:8000`):
+If demonstrating conversational multi-agent orchestration for technical/AI audiences (`ehr_chart_summary_agent/.venv/bin/adk web` on `http://127.0.0.1:8000`):
 
 1. **`Hi`** $\rightarrow$ Agent greets physician and renders the live 7-patient FHIR ward table.
 2. **`Select pat-007 (Marcus Vance)`** $\rightarrow$ Surfaces ER-prescribed potassium-wasting **Chlorthalidone** despite `K+ 3.2 mEq/L` AND catches an **unreviewed August send-out `Aldosterone-to-Renin Ratio = 95`** confirming **Primary Hyperaldosteronism (Conn's Syndrome)**.

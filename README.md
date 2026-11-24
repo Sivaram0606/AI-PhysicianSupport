@@ -67,11 +67,13 @@ AI-PhysicianSupport/
 ├── CLOUD_RUN_DEPLOYMENT_GUIDE.md                 # End-to-end Google Cloud Run deployment & IAP operations guide
 ├── DEMO_GUIDE.md                                 # Click-by-click live demo script & presenter talk track
 ├── DEMO_SLIDES.html                              # 10-slide interactive HTML presentation deck (speaker notes + PDF print)
+├── DEMO_SLIDES.pptx                              # Editable PowerPoint companion deck
+├── AGENTIC_ARCHITECTURE_AND_FUNCTIONALITY.pptx   # Agentic architecture & functionality deep-dive deck
 ├── requirements.txt
 ├── Dockerfile                                    # Non-root Python 3.13 Cloud Run container (Streamlit UI + ADK Web)
-├── .dockerignore                                 # Excludes .venv, .git, and .env secrets from Cloud Build context
-├── deploy_cloud_run.sh                           # One-command Google Cloud Run deployment (least-privilege SA + IAP)
-├── physician_assist_app.py                       # Emergency Physician Assist Web UI (Roster + 4-Step Gate + Separate Symptom Mapper UI)
+├── .dockerignore                                 # Excludes .venv, .git, .env secrets, videos & slide decks from Cloud Build context
+├── deploy_cloud_run.sh                           # One-command Google Cloud Run deployment (FHIR seeding + least-privilege SA + IAP)
+├── physician_assist_app.py                       # Emergency Physician Assist Web UI (Roster + 4-Step Gate + Competing Hypotheses Scorecard)
 ├── run_demo.py                                   # CLI runner (live ADK + --offline deterministic trace)
 ├── outputs/                                      # Generated Interactive 4-Track HTML/SVG Swimlane Viewers
 │   └── clinical_swimlane_pat-005.html
@@ -367,7 +369,7 @@ Check for any active outbreaks and persistent diseases in his zip code
 - **Single-Flight FHIR `$everything` Deduplication (`6x -> 1x` GCP HTTP Request)**: Per-patient single-flight locks (`_FHIR_INFLIGHT_LOCKS`) and a 90s TTL cache (`_FHIR_BUNDLE_CACHE`) in `ehr_chart_tools.py` collapse concurrent `ParallelAgent` and UI compartment reads into a single GCP Cloud Healthcare `$everything` call (`<0.1 ms` warm).
 - **Thread-Safe OAuth2 & HTTP Connection Pooling**: Singleton GCP `AuthorizedSession` (`HTTPAdapter(pool_connections=12, pool_maxsize=16)`) in `server.py` and shared pooled `_HTTP_SESSION` + TTL caches (`_ROSTER_CACHE`, `_DRUG_CACHE`, `_OUTBREAK_CACHE`) in `clinical_tools.py` eliminate repeated ADC token handshakes and TCP/TLS setup overhead.
 - **Single-Call Parallel Medication Regimen Audit**: `audit_patient_medications_rxnorm_openfda(patient_id)` audits all active and held/stopped medications concurrently across NIH RxNorm (`properties.json` + `related.json`) and OpenFDA (`SPL Label` + `FAERS`) in **1 LLM tool call** while deterministically flagging cross-status brand-vs-generic duplicate active ingredients (e.g., `Tylenol` + leftover `Acetaminophen`).
-- **Concurrent 4-Source ZIP Surveillance & Streamlined ADK Execution**: `get_location_outbreak_and_disease_data` runs `CDC PLACES ZCTA5`, `CDC NSSP ED`, `CDC NWSS Wastewater`, and `Open-Meteo AQI` concurrently; `symptom_mapping_pipeline` reuses a singleton `InMemoryRunner` with a `ParallelAgent` intake stage; and `root_agent` binds direct in-process tools to avoid redundant 1-tool sub-agent handoffs.
+- **Concurrent 4-Source ZIP Surveillance & Streamlined ADK Execution**: `get_location_outbreak_and_disease_data` runs `CDC PLACES ZCTA5`, `CDC NSSP ED`, `CDC NWSS Wastewater`, and `Open-Meteo AQI` concurrently (with Open-Meteo running in parallel with Census Tract lookup); `symptom_mapping_pipeline` reuses a singleton `InMemoryRunner` with ephemeral session cleanup; swimlane HTML renders in memory for the UI (and writes atomically via `os.replace` for CLI/ADK outputs); and `root_agent` binds direct in-process tools to avoid redundant 1-tool sub-agent handoffs.
 
 ### Security Architecture Hardening
 - **GCP Healthcare SSRF & Dot-Segment Path Traversal Prevention (`CWE-22` / `CWE-918`)**: Strict leading-alphanumeric identifier validation (`^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$`), explicit `".."` rejection, and `urllib.parse.quote(..., safe="")` protect all GCP Healthcare URL builders across `server.py`, `ehr_chart_tools.py`, `clinical_tools.py`, and `seed_fhir_store.py`.
