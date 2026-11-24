@@ -1,8 +1,8 @@
 # Live Demo Guide & Presenter Talk Track — AI Physician Emergency Support
 
-This document provides a **complete live demonstration script, click-by-click walkthrough, and presenter talk track** for showcasing the **Emergency Physician Assist UI** ([`physician_assist_app.py`](physician_assist_app.py)) and **Google ADK Multi-Agent Clinical Pipelines** ([`ehr_chart_summary_agent`](ehr_chart_summary_agent/agent.py)).
+This document provides a **complete live demonstration script, click-by-click walkthrough, and presenter talk track** for showcasing the **Emergency Physician Assist UI** and **Google ADK Multi-Agent Clinical Pipelines**.
 
-> **Companion Slide Decks**: Open [`DEMO_SLIDES.html`](DEMO_SLIDES.html) in any browser for a 10-slide interactive presentation deck (`←` / `→` keys to navigate, `N` to toggle Speaker Notes, `F` for Fullscreen, `Cmd/Ctrl + P` to export to PDF). Editable PowerPoint decks are also available in [`DEMO_SLIDES.pptx`](DEMO_SLIDES.pptx) and [`AGENTIC_ARCHITECTURE_AND_FUNCTIONALITY.pptx`](AGENTIC_ARCHITECTURE_AND_FUNCTIONALITY.pptx).
+> **Companion Slide Decks**: Open the companion interactive HTML or PowerPoint presentation decks for slide visuals and presenter talk tracks (`←` / `→` keys to navigate, `N` to toggle Speaker Notes, `F` for Fullscreen, `Cmd/Ctrl + P` to export to PDF).
 
 ---
 
@@ -23,7 +23,7 @@ This document provides a **complete live demonstration script, click-by-click wa
 Choose either the **Cloud Run URL** or **Local Streamlit**:
 
 - **Cloud Run (Live Cloud Environment)**:
-  1. Open **`https://emergency-physician-assist-<PROJECT_NUMBER>.us-central1.run.app`** in Chrome while signed into your authorized Google account (IAP authenticates automatically).
+  1. Open **`https://demo-2347.1987984870407.demo.altostrat.com`** in Chrome while signed into your authorized Google account (IAP authenticates automatically).
   2. *(Optional warm-up)* Click once on the ward roster 30 seconds before presenting so the container is warm.
 - **Local Backup (Zero-Dependency Fallback)**:
   ```bash
